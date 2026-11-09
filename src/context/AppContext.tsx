@@ -18,6 +18,26 @@ import {
   playAlertSound,
 } from '../utils/notificationUtils';
 import { saveToIndexedDB, loadFromIndexedDB } from '../utils/dbStorage';
+import {
+  getSupabaseClient,
+  isSupabaseConfigured,
+  mapDBToProduct,
+  mapProductToDB,
+  mapDBToSale,
+  mapSaleToDB,
+  mapDBToPurchase,
+  mapPurchaseToDB,
+  mapDBToDebt,
+  mapDebtToDB,
+  mapDBToDailyReport,
+  mapDailyReportToDB,
+  mapDBToExpense,
+  mapExpenseToDB,
+  mapDBToUser,
+  mapUserToDB,
+  mapDBToAuditLog,
+  mapAuditLogToDB,
+} from '../lib/supabase';
 
 // Initial Users
 const INITIAL_USERS: User[] = [
@@ -226,6 +246,10 @@ interface AppContextType {
   notificationPermission: NotificationPermission;
   requestPushPermission: () => Promise<NotificationPermission>;
   triggerTestNotification: () => void;
+  isSupabaseConnected: boolean;
+  supabaseStatus: string;
+  syncAllLocalDataToSupabase: () => Promise<{ success: boolean; error?: string }>;
+  reloadFromSupabase: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -294,6 +318,256 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     return 'default';
   });
+
+  const [isSupabaseConnected, setIsSupabaseConnected] = useState(false);
+  const [supabaseStatus, setSupabaseStatus] = useState<string>(() => {
+    return isSupabaseConfigured() ? 'Qoşulur...' : 'Lokal rejim (Supabase quraşdırılmayıb)';
+  });
+
+  // Reload all records from Supabase
+  const reloadFromSupabase = useCallback(async () => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    try {
+      setSupabaseStatus('Supabase-dən məlumatlar yüklənir...');
+      const [
+        prodsRes,
+        usersRes,
+        salesRes,
+        purchasesRes,
+        debtsRes,
+        reportsRes,
+        expensesRes,
+        settingsRes,
+        logsRes,
+      ] = await Promise.all([
+        supabase.from('products').select('*'),
+        supabase.from('users').select('*'),
+        supabase.from('sales').select('*').order('created_at', { ascending: false }),
+        supabase.from('purchases').select('*').order('created_at', { ascending: false }),
+        supabase.from('debts').select('*').order('created_at', { ascending: false }),
+        supabase.from('daily_reports').select('*').order('date', { ascending: false }),
+        supabase.from('expenses').select('*').order('created_at', { ascending: false }),
+        supabase.from('app_settings').select('*').eq('id', 'global').maybeSingle(),
+        supabase.from('audit_logs').select('*').order('timestamp', { ascending: false }).limit(100),
+      ]);
+
+      if (prodsRes.data && prodsRes.data.length > 0) setProducts(prodsRes.data.map(mapDBToProduct));
+      if (usersRes.data && usersRes.data.length > 0) setUsers(usersRes.data.map(mapDBToUser));
+      if (salesRes.data) setSales(salesRes.data.map(mapDBToSale));
+      if (purchasesRes.data) setPurchases(purchasesRes.data.map(mapDBToPurchase));
+      if (debtsRes.data) setDebts(debtsRes.data.map(mapDBToDebt));
+      if (reportsRes.data) setDailyReports(reportsRes.data.map(mapDBToDailyReport));
+      if (expensesRes.data) setExpenses(expensesRes.data.map(mapDBToExpense));
+      if (settingsRes.data) {
+        setSettings({
+          minStockThreshold: Number(settingsRes.data.min_stock_threshold) || 5,
+          autoConfirmSales: Boolean(settingsRes.data.auto_confirm_sales),
+          barName: settingsRes.data.bar_name || 'Zal Barı',
+          enablePushNotifications: Boolean(settingsRes.data.enable_push_notifications),
+        });
+      }
+      if (logsRes.data && logsRes.data.length > 0) setAuditLogs(logsRes.data.map(mapDBToAuditLog));
+
+      setIsSupabaseConnected(true);
+      setSupabaseStatus('Canlı Sinxronizasiya Aktivdir');
+    } catch (e) {
+      console.warn('reloadFromSupabase error:', e);
+      setSupabaseStatus('Lokal rejim (Supabase cavab vermir)');
+    }
+  }, []);
+
+  // Supabase Initial Fetch and Realtime Subscription
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      setIsSupabaseConnected(false);
+      setSupabaseStatus('Lokal rejim (Supabase quraşdırılmayıb)');
+      return;
+    }
+
+    let isMounted = true;
+    reloadFromSupabase();
+
+    // Set up Realtime listener on all relevant tables
+    const channel = supabase
+      .channel('zalbar_realtime_sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'INSERT') {
+          const newSale = mapDBToSale(payload.new);
+          setSales((prev) => {
+            if (prev.some((s) => s.id === newSale.id)) return prev;
+            return [newSale, ...prev];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const updated = mapDBToSale(payload.new);
+          setSales((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+        } else if (payload.eventType === 'DELETE') {
+          setSales((prev) => prev.filter((s) => s.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'purchases' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'INSERT') {
+          const newP = mapDBToPurchase(payload.new);
+          setPurchases((prev) => {
+            if (prev.some((p) => p.id === newP.id)) return prev;
+            return [newP, ...prev];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const updated = mapDBToPurchase(payload.new);
+          setPurchases((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+        } else if (payload.eventType === 'DELETE') {
+          setPurchases((prev) => prev.filter((p) => p.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'INSERT') {
+          const newProd = mapDBToProduct(payload.new);
+          setProducts((prev) => {
+            if (prev.some((p) => p.id === newProd.id)) return prev;
+            return [...prev, newProd];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const updated = mapDBToProduct(payload.new);
+          setProducts((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+        } else if (payload.eventType === 'DELETE') {
+          setProducts((prev) => prev.filter((p) => p.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'INSERT') {
+          const newDebt = mapDBToDebt(payload.new);
+          setDebts((prev) => {
+            if (prev.some((d) => d.id === newDebt.id)) return prev;
+            return [newDebt, ...prev];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const updated = mapDBToDebt(payload.new);
+          setDebts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+        } else if (payload.eventType === 'DELETE') {
+          setDebts((prev) => prev.filter((d) => d.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_reports' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          const report = mapDBToDailyReport(payload.new);
+          setDailyReports((prev) => {
+            const idx = prev.findIndex((r) => r.date === report.date);
+            if (idx >= 0) {
+              const copy = [...prev];
+              copy[idx] = report;
+              return copy;
+            }
+            return [report, ...prev];
+          });
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'INSERT') {
+          const newExp = mapDBToExpense(payload.new);
+          setExpenses((prev) => {
+            if (prev.some((e) => e.id === newExp.id)) return prev;
+            return [newExp, ...prev];
+          });
+        } else if (payload.eventType === 'DELETE') {
+          setExpenses((prev) => prev.filter((e) => e.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'INSERT') {
+          const newUser = mapDBToUser(payload.new);
+          setUsers((prev) => {
+            if (prev.some((u) => u.id === newUser.id)) return prev;
+            return [...prev, newUser];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const updated = mapDBToUser(payload.new);
+          setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
+        } else if (payload.eventType === 'DELETE') {
+          setUsers((prev) => prev.filter((u) => u.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
+          setSettings({
+            minStockThreshold: Number(payload.new.min_stock_threshold) || 5,
+            autoConfirmSales: Boolean(payload.new.auto_confirm_sales),
+            barName: payload.new.bar_name || 'Zal Barı',
+            enablePushNotifications: Boolean(payload.new.enable_push_notifications),
+          });
+        }
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setIsSupabaseConnected(true);
+          setSupabaseStatus('Canlı Sinxronizasiya Aktivdir');
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setIsSupabaseConnected(false);
+          setSupabaseStatus('Real-vaxt bağlantısı kəsildi');
+        }
+      });
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, [reloadFromSupabase]);
+
+  // Bulk push local data to Supabase
+  const syncAllLocalDataToSupabase = async (): Promise<{ success: boolean; error?: string }> => {
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+      return { success: false, error: 'Supabase qoşulmayıb! URL və Anon Key daxil edin.' };
+    }
+
+    try {
+      await supabase.from('app_settings').upsert({
+        id: 'global',
+        min_stock_threshold: settings.minStockThreshold,
+        auto_confirm_sales: settings.autoConfirmSales,
+        bar_name: settings.barName,
+        enable_push_notifications: settings.enablePushNotifications,
+      });
+
+      if (users.length > 0) {
+        await supabase.from('users').upsert(users.map(mapUserToDB));
+      }
+      if (products.length > 0) {
+        await supabase.from('products').upsert(products.map(mapProductToDB));
+      }
+      if (purchases.length > 0) {
+        await supabase.from('purchases').upsert(purchases.map(mapPurchaseToDB));
+      }
+      if (sales.length > 0) {
+        await supabase.from('sales').upsert(sales.map(mapSaleToDB));
+      }
+      if (debts.length > 0) {
+        await supabase.from('debts').upsert(debts.map(mapDebtToDB));
+      }
+      if (dailyReports.length > 0) {
+        await supabase.from('daily_reports').upsert(dailyReports.map(mapDailyReportToDB));
+      }
+      if (expenses.length > 0) {
+        await supabase.from('expenses').upsert(expenses.map(mapExpenseToDB));
+      }
+
+      setIsSupabaseConnected(true);
+      setSupabaseStatus('Canlı Sinxronizasiya Aktivdir');
+      return { success: true };
+    } catch (err: any) {
+      console.error('syncAllLocalDataToSupabase error:', err);
+      return { success: false, error: err?.message || 'Sinxronizasiya xətası baş verdi' };
+    }
+  };
 
   // Set the zeroed flag on first mount
   useEffect(() => {
@@ -436,7 +710,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setCurrentUser(null);
   };
 
+  const safeDbExec = (query: any) => {
+    Promise.resolve(query).catch(err => {
+      console.warn('Supabase sinxronizasiya bildirişi:', err);
+    });
+  };
+
   const addUser = (newUser: Omit<User, 'id' | 'createdAt'>) => {
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin istifadəçi əlavə edə bilər!');
+      return;
+    }
     const user: User = {
       ...newUser,
       id: `u-${Date.now()}`,
@@ -444,23 +728,56 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setUsers(prev => [...prev, user]);
     addAuditLog('İstifadəçi əlavə edildi', `Yeni istifadəçi: ${user.username} (${user.role})`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('users').insert(mapUserToDB(user)));
+    }
   };
 
   const updateUser = (id: string, updates: Partial<User>) => {
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin istifadəçi məlumatlarını dəyişə bilər!');
+      return;
+    }
     setUsers(prev => prev.map(u => (u.id === id ? { ...u, ...updates } : u)));
     if (currentUser && currentUser.id === id) {
       setCurrentUser(prev => (prev ? { ...prev, ...updates } : null));
     }
     addAuditLog('İstifadəçi yeniləndi', `İstifadəçi ID: ${id} məlumatları dəyişdirildi.`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('users').update({
+        ...(updates.name && { name: updates.name }),
+        ...(updates.username && { username: updates.username }),
+        ...(updates.password && { password: updates.password }),
+        ...(updates.role && { role: updates.role }),
+        ...(updates.isActive !== undefined && { is_active: updates.isActive }),
+      }).eq('id', id));
+    }
   };
 
   const deleteUser = (id: string) => {
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin istifadəçi silə bilər!');
+      return;
+    }
     const target = users.find(u => u.id === id);
     setUsers(prev => prev.filter(u => u.id !== id));
     addAuditLog('İstifadəçi silindi', `Silinən istifadəçi: ${target?.username}`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('users').delete().eq('id', id));
+    }
   };
 
   const addProduct = (newProd: Omit<Product, 'id' | 'createdAt'>) => {
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin məhsul əlavə edə bilər!');
+      return;
+    }
     const product: Product = {
       ...newProd,
       id: `prod-${Date.now()}`,
@@ -468,19 +785,55 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setProducts(prev => [...prev, product]);
     addAuditLog('Məhsul əlavə edildi', `${product.name} (${product.salePrice} AZN)`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('products').insert(mapProductToDB(product)));
+    }
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin məhsul məlumatlarını redaktə edə bilər!');
+      return;
+    }
     setProducts(prev => prev.map(p => (p.id === id ? { ...p, ...updates } : p)));
     addAuditLog('Məhsul redaktə edildi', `Məhsul ID: ${id} yeniləndi.`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const dbUpdates: any = {};
+      if (updates.name !== undefined) dbUpdates.name = updates.name;
+      if (updates.barcode !== undefined) dbUpdates.barcode = updates.barcode;
+      if (updates.salePrice !== undefined) dbUpdates.sale_price = updates.salePrice;
+      if (updates.buyPrice !== undefined) dbUpdates.buy_price = updates.buyPrice;
+      if (updates.category !== undefined) dbUpdates.category = updates.category;
+      if (updates.volume !== undefined) dbUpdates.volume = updates.volume;
+      if (updates.initialStock !== undefined) dbUpdates.initial_stock = updates.initialStock;
+      if (updates.minStockAlert !== undefined) dbUpdates.min_stock_alert = updates.minStockAlert;
+      if (updates.note !== undefined) dbUpdates.note = updates.note;
+      if (updates.image !== undefined) dbUpdates.image = updates.image;
+
+      safeDbExec(supabase.from('products').update(dbUpdates).eq('id', id));
+    }
   };
 
   const deleteProduct = (id: string) => {
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin məhsul silə bilər!');
+      return;
+    }
     const target = products.find(p => p.id === id);
     setProducts(prev => prev.filter(p => p.id !== id));
     addAuditLog('Məhsul silindi', `Silinən məhsul: ${target?.name}`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('products').delete().eq('id', id));
+    }
   };
 
+  // Mal qəbulu və su əlavəetmə (Həm Admin, həm də İşçi su əlavə edə bilər)
   const addPurchase = (newPur: Omit<PurchaseIntake, 'id' | 'createdAt' | 'createdBy'>) => {
     const purchase: PurchaseIntake = {
       ...newPur,
@@ -490,11 +843,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setPurchases(prev => [purchase, ...prev]);
     addAuditLog('Mal qəbulu daxil edildi', `${purchase.productName}: ${purchase.quantity} ədəd, ${purchase.paidAmount} AZN`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('purchases').insert(mapPurchaseToDB(purchase)));
+    }
   };
 
   const deletePurchase = (id: string) => {
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin mal qəbulunu silə bilər!');
+      return;
+    }
     setPurchases(prev => prev.filter(p => p.id !== id));
     addAuditLog('Mal qəbulu silindi', `Qəbul qeydi silindi ID: ${id}`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('purchases').delete().eq('id', id));
+    }
   };
 
   const getProductStock = useCallback(
@@ -616,8 +983,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setSales(updatedSales);
 
     // If payment type is BORC, automatically create a DebtRecord
+    let createdDebt: DebtRecord | null = null;
     if (saleData.paymentType === 'borc' && saleData.debtorName) {
-      const newDebt: DebtRecord = {
+      createdDebt = {
         id: `debt-${Date.now()}`,
         debtorName: saleData.debtorName.trim(),
         items: resolvedItems.map(i => ({
@@ -635,7 +1003,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      setDebts(prev => [newDebt, ...prev]);
+      setDebts(prev => [createdDebt!, ...prev]);
     }
 
     // Sync daily report
@@ -663,6 +1031,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       `Məbləğ: ${totalAmount.toFixed(2)} AZN, Ödəniş: ${saleData.paymentType.toUpperCase()}`
     );
 
+    // Sync to Supabase in background
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('sales').insert(mapSaleToDB(newSale)));
+      if (createdDebt) {
+        safeDbExec(supabase.from('debts').insert(mapDebtToDB(createdDebt)));
+      }
+    }
+
     return { success: true, saleId };
   };
 
@@ -677,6 +1054,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             confirmedBy: currentUser?.username || 'admin',
           };
           syncDailyReportForDate(updated.date, updated);
+
+          const supabase = getSupabaseClient();
+          if (supabase) {
+            safeDbExec(supabase.from('sales').update({
+              is_confirmed: true,
+              confirmed_at: updated.confirmedAt,
+              confirmed_by: updated.confirmedBy,
+            }).eq('id', saleId));
+          }
+
           return updated;
         }
         return s;
@@ -687,28 +1074,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const confirmDaySales = (date: string) => {
     setSales(prev =>
-      prev.map(s =>
-        s.date === date && !s.isConfirmed
-          ? {
-              ...s,
-              isConfirmed: true,
-              confirmedAt: new Date().toISOString(),
-              confirmedBy: currentUser?.username || 'admin',
-            }
-          : s
-      )
+      prev.map(s => {
+        if (s.date === date && !s.isConfirmed) {
+          const updated = {
+            ...s,
+            isConfirmed: true,
+            confirmedAt: new Date().toISOString(),
+            confirmedBy: currentUser?.username || 'admin',
+          };
+          const supabase = getSupabaseClient();
+          if (supabase) {
+            safeDbExec(supabase.from('sales').update({
+              is_confirmed: true,
+              confirmed_at: updated.confirmedAt,
+              confirmed_by: updated.confirmedBy,
+            }).eq('id', s.id));
+          }
+          return updated;
+        }
+        return s;
+      })
     );
     syncDailyReportForDate(date);
     addAuditLog('Günlük Satışlar Təsdiqləndi', `${date} tarixinə aid satışlar təsdiqləndi.`);
   };
 
+  // Yalnız Admin satışları silə bilər (İşçi Admin məlumatlarını silə bilməz)
   const deleteSale = (saleId: string) => {
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin satışları silə bilər!');
+      return;
+    }
     const s = sales.find(x => x.id === saleId);
     setSales(prev => prev.filter(x => x.id !== saleId));
     if (s) {
       syncDailyReportForDate(s.date);
     }
     addAuditLog('Satış Silindi', `Satış ID: ${saleId} silindi.`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('sales').delete().eq('id', saleId));
+    }
   };
 
   const addDebt = (newDebt: Omit<DebtRecord, 'id' | 'createdAt' | 'updatedAt' | 'payments' | 'remainingAmount' | 'status'>) => {
@@ -724,6 +1131,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setDebts(prev => [debt, ...prev]);
     addAuditLog('Borc Qeydi Əlavə Edildi', `${debt.debtorName}: ${debt.totalAmount} AZN.`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('debts').insert(mapDebtToDB(debt)));
+    }
   };
 
   const payDebt = (debtId: string, amount: number, note?: string) => {
@@ -742,7 +1154,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             amount: cleanAmount,
             note: note || 'Ödəniş',
           };
-          return {
+          const updated: DebtRecord = {
             ...d,
             paidAmount: newPaid,
             remainingAmount: newRemaining,
@@ -750,6 +1162,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             payments: [newPayment, ...d.payments],
             updatedAt: new Date().toISOString(),
           };
+
+          const supabase = getSupabaseClient();
+          if (supabase) {
+            safeDbExec(supabase.from('debts').update(mapDebtToDB(updated)).eq('id', debtId));
+          }
+
+          return updated;
         }
         return d;
       })
@@ -791,9 +1210,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     addAuditLog('Gündəlik Hesabat Saxlanıldı', `${report.date}: Cəm ${total} AZN.`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('daily_reports').upsert(mapDailyReportToDB(fullReport)));
+    }
   };
 
   const addExpense = (newExp: Omit<Expense, 'id' | 'createdAt' | 'createdBy'>) => {
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin xərc daxil edə bilər!');
+      return;
+    }
     const expense: Expense = {
       ...newExp,
       id: `exp-${Date.now()}`,
@@ -802,20 +1230,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setExpenses(prev => [expense, ...prev]);
     addAuditLog('Xərc Əlavə Edildi', `${expense.category}: ${expense.amount} AZN (${expense.note || ''})`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('expenses').insert(mapExpenseToDB(expense)));
+    }
   };
 
   const deleteExpense = (id: string) => {
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin xərcləri silə bilər!');
+      return;
+    }
     setExpenses(prev => prev.filter(e => e.id !== id));
     addAuditLog('Xərc Silindi', `Xərc ID: ${id}`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('expenses').delete().eq('id', id));
+    }
   };
 
   const updateSettings = (newSettings: Partial<AppSettings>) => {
-    setSettings(prev => ({ ...prev, ...newSettings }));
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin parametrləri yeniləyə bilər!');
+      return;
+    }
+    const updated = { ...settings, ...newSettings };
+    setSettings(updated);
     addAuditLog('Ayarlar Yeniləndi', 'Sistem parametrləri yeniləndi.');
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('app_settings').upsert({
+        id: 'global',
+        min_stock_threshold: updated.minStockThreshold,
+        auto_confirm_sales: updated.autoConfirmSales,
+        bar_name: updated.barName,
+        enable_push_notifications: updated.enablePushNotifications,
+      }));
+    }
   };
 
   // Zero-out all transaction data while keeping products, users, and settings intact
-  const clearAllTransactions = () => {
+  const clearAllTransactions = async () => {
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin əməliyyatları sıfırlaya bilər!');
+      return;
+    }
     setSales([]);
     setPurchases([]);
     setDebts([]);
@@ -827,6 +1289,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     saveToDualStorage('expenses', []);
     saveToDualStorage('dailyReports', []);
     addAuditLog('Əməliyyatlar Sıfırlandı', 'Bütün satış, borc, mal qəbulu və xərclər sıfırlandı.');
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await Promise.all([
+          supabase.from('sales').delete().neq('id', 'keep_all_guard_never_match'),
+          supabase.from('purchases').delete().neq('id', 'keep_all_guard_never_match'),
+          supabase.from('debts').delete().neq('id', 'keep_all_guard_never_match'),
+          supabase.from('expenses').delete().neq('id', 'keep_all_guard_never_match'),
+          supabase.from('daily_reports').delete().neq('id', 'keep_all_guard_never_match'),
+        ]);
+      } catch (e) {
+        console.warn('Supabase clear transactions error:', e);
+      }
+    }
   };
 
   const resetToSampleData = () => {
@@ -902,6 +1379,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         notificationPermission,
         requestPushPermission,
         triggerTestNotification,
+        isSupabaseConnected,
+        supabaseStatus,
+        syncAllLocalDataToSupabase,
+        reloadFromSupabase,
       }}
     >
       {children}

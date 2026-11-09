@@ -20,9 +20,11 @@ import {
   Database,
   Trash,
   Smartphone,
+  Radio,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { PWAInstallButton } from '../components/PWAInstallButton';
+import { SupabaseSyncModal } from '../components/SupabaseSyncModal';
 import { User, UserRole } from '../types';
 import { formatDateTimeAZ } from '../utils/dateUtils';
 import {
@@ -57,9 +59,12 @@ export const AdminPanelView: React.FC = () => {
     notificationPermission,
     requestPushPermission,
     triggerTestNotification,
+    isSupabaseConnected,
+    supabaseStatus,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'users' | 'settings' | 'backup' | 'audit'>('settings');
+  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
 
   // User modal state
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
@@ -587,6 +592,64 @@ export const AdminPanelView: React.FC = () => {
          ───────────────────────────────────────────────────────── */}
       {activeTab === 'backup' && (
         <div className="space-y-6">
+          {/* Supabase Realtime Cloud Sync Card */}
+          <div className="p-6 bg-gradient-to-r from-zinc-900 via-zinc-900 to-zinc-950 rounded-3xl border border-red-500/40 shadow-xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border ${
+                  isSupabaseConnected
+                    ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800 shadow-lg shadow-emerald-900/30'
+                    : 'bg-zinc-800 text-amber-400 border-zinc-700'
+                }`}>
+                  <Radio className={`w-6 h-6 ${isSupabaseConnected ? 'animate-pulse' : ''}`} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-black text-white">
+                      Supabase Vahid Baza & Real-Vaxt Sinxronizasiya
+                    </h3>
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border ${
+                      isSupabaseConnected
+                        ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                        : 'bg-amber-950 text-amber-400 border-amber-800'
+                    }`}>
+                      {isSupabaseConnected ? 'Realtime Aktiv' : 'Lokal Rejim'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    İşçi və Admin telefonları eyni mərkəzi bazaya qoşulur. İşçinin vurduğu satış dərhal Admin ekranında görünür, su qalığı eyni qalır.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIsSupabaseModalOpen(true)}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-red-600/30 flex items-center gap-2 whitespace-nowrap self-start sm:self-auto"
+              >
+                <Radio className="w-4 h-4" />
+                <span>Supabase Parametrləri & SQL</span>
+              </button>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-zinc-950/90 border border-zinc-800/80 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+              <div>
+                <span className="text-zinc-500 block uppercase text-[10px]">Realtime Status</span>
+                <span className="font-bold text-zinc-200">{supabaseStatus}</span>
+              </div>
+              <div>
+                <span className="text-zinc-500 block uppercase text-[10px]">Çoxcihazlı Sinxronizasiya</span>
+                <span className="font-bold text-zinc-200">
+                  {isSupabaseConnected ? 'Avtomatik (PC + iPhone + Android)' : 'Qoşulduqdan sonra aktiv'}
+                </span>
+              </div>
+              <div>
+                <span className="text-zinc-500 block uppercase text-[10px]">İşçi İcazə Qorunması</span>
+                <span className="font-bold text-emerald-400">Silmə/Dəyişmə Bloklanıb ✓</span>
+              </div>
+            </div>
+          </div>
+
           {/* Permanent Database Status Card */}
           <div className="p-6 bg-zinc-900 rounded-3xl border border-zinc-800 shadow-xl space-y-4">
             <div className="flex items-center gap-3">
@@ -884,6 +947,12 @@ export const AdminPanelView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Supabase Sync & Setup Modal */}
+      <SupabaseSyncModal
+        isOpen={isSupabaseModalOpen}
+        onClose={() => setIsSupabaseModalOpen(false)}
+      />
     </div>
   );
 };

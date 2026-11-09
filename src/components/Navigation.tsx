@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard,
   ShoppingCart,
@@ -14,9 +14,11 @@ import {
   FileSpreadsheet,
   Bell,
   BellRing,
+  Database,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { PWAInstallButton } from './PWAInstallButton';
+import { SupabaseSyncModal } from './SupabaseSyncModal';
 
 export type NavTab =
   | 'dashboard'
@@ -42,8 +44,10 @@ export const Sidebar: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) 
     settings,
     notificationPermission,
     requestPushPermission,
+    isSupabaseConnected,
   } = useApp();
   const isAdmin = currentUser?.role === 'admin';
+  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
 
   const navItems: { id: NavTab; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
     {
@@ -136,6 +140,28 @@ export const Sidebar: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) 
         </div>
       )}
 
+      {/* Supabase Realtime Cloud Sync Bar */}
+      <div className="px-3 pt-2">
+        <button
+          onClick={() => setIsSupabaseModalOpen(true)}
+          className={`w-full py-1.5 px-3 rounded-xl text-[11px] font-semibold flex items-center justify-between transition-colors border ${
+            isSupabaseConnected
+              ? 'bg-zinc-900 border-emerald-900/60 text-emerald-400'
+              : 'bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:text-white'
+          }`}
+          title="Supabase Vahid Baza və Real-vaxt Sinxronizasiya Parametrləri"
+        >
+          <div className="flex items-center gap-1.5">
+            <Database className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+            <span>Supabase:</span>
+          </div>
+          <span className="font-bold flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConnected ? 'bg-emerald-400 animate-ping' : 'bg-zinc-500'}`} />
+            {isSupabaseConnected ? 'Canlı' : 'Quraşdır'}
+          </span>
+        </button>
+      </div>
+
       {/* Nav List */}
       <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
         {visibleItems.map(item => {
@@ -198,6 +224,11 @@ export const Sidebar: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) 
           <span>Sistemdən Çıxış</span>
         </button>
       </div>
+
+      <SupabaseSyncModal
+        isOpen={isSupabaseModalOpen}
+        onClose={() => setIsSupabaseModalOpen(false)}
+      />
     </aside>
   );
 };
@@ -205,8 +236,9 @@ export const Sidebar: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) 
 export const MobileHeader: React.FC<{
   activeTab: NavTab;
 }> = ({ activeTab }) => {
-  const { currentUser, settings, theme, toggleTheme, logout } = useApp();
+  const { currentUser, settings, theme, toggleTheme, logout, isSupabaseConnected } = useApp();
   const isAdmin = currentUser?.role === 'admin';
+  const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
 
   const tabTitles: Record<NavTab, string> = {
     dashboard: 'Xülasə',
@@ -220,40 +252,61 @@ export const MobileHeader: React.FC<{
   };
 
   return (
-    <header className="lg:hidden sticky top-0 z-30 bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800/80 px-4 h-14 flex items-center justify-between text-white">
-      <div className="flex items-center gap-2.5">
-        <div className="w-8 h-8 rounded-lg bg-red-600 text-white flex items-center justify-center font-bold shadow-md shadow-red-600/30">
-          <Dumbbell className="w-4 h-4" />
+    <>
+      <header className="lg:hidden sticky top-0 z-30 bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800/80 px-4 h-14 flex items-center justify-between text-white">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-lg bg-red-600 text-white flex items-center justify-center font-bold shadow-md shadow-red-600/30">
+            <Dumbbell className="w-4 h-4" />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-white leading-tight">
+              {tabTitles[activeTab]}
+            </h2>
+            <p className="text-[10px] text-zinc-400">
+              {settings.barName} · <span className="text-red-400 font-semibold">{isAdmin ? 'Admin' : 'İşçi'}</span>
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-sm font-bold text-white leading-tight">
-            {tabTitles[activeTab]}
-          </h2>
-          <p className="text-[10px] text-zinc-400">
-            {settings.barName} · <span className="text-red-400 font-semibold">{isAdmin ? 'Admin' : 'İşçi'}</span>
-          </p>
-        </div>
-      </div>
 
-      <div className="flex items-center gap-1.5">
-        <PWAInstallButton variant="compact" />
-        <button
-          onClick={toggleTheme}
-          aria-label="Rejim"
-          className="p-2 text-zinc-300 rounded-lg hover:bg-zinc-800"
-        >
-          {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
-        </button>
-        <button
-          onClick={logout}
-          aria-label="Çıxış"
-          className="p-2 text-red-400 rounded-lg hover:bg-red-950/40"
-          title="Çıxış"
-        >
-          <LogOut className="w-4 h-4" />
-        </button>
-      </div>
-    </header>
+        <div className="flex items-center gap-1.5">
+          {/* Supabase status badge on mobile */}
+          <button
+            onClick={() => setIsSupabaseModalOpen(true)}
+            className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 ${
+              isSupabaseConnected
+                ? 'bg-zinc-900 border-emerald-900/60 text-emerald-400'
+                : 'bg-zinc-900 border-zinc-800 text-zinc-400'
+            }`}
+            title="Supabase Canlı Sinxronizasiya"
+          >
+            <Database className="w-3.5 h-3.5" />
+            <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConnected ? 'bg-emerald-400 animate-ping' : 'bg-zinc-600'}`} />
+          </button>
+
+          <PWAInstallButton variant="compact" />
+          <button
+            onClick={toggleTheme}
+            aria-label="Rejim"
+            className="p-2 text-zinc-300 rounded-lg hover:bg-zinc-800"
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+          </button>
+          <button
+            onClick={logout}
+            aria-label="Çıxış"
+            className="p-2 text-red-400 rounded-lg hover:bg-red-950/40"
+            title="Çıxış"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
+      </header>
+
+      <SupabaseSyncModal
+        isOpen={isSupabaseModalOpen}
+        onClose={() => setIsSupabaseModalOpen(false)}
+      />
+    </>
   );
 };
 
