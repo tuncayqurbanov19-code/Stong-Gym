@@ -1,0 +1,6 @@
+{
+  "name": "Zal Barı İdarəetmə Sistemi",
+  "description": "Zal barı üçün satış, kassa, depo, borc qeydiyyatı və gündəlik hesabat idarəetmə sistemi.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

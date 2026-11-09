@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#18181b" />
+      <stop offset="100%" stop-color="#09090b" />
+    </linearGradient>
+    <linearGradient id="redGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ef4444" />
+      <stop offset="100%" stop-color="#b91c1c" />
+    </linearGradient>
+  </defs>
+  <!-- Background with rounded squircle -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <rect x="12" y="12" width="488" height="488" rx="100" fill="none" stroke="#ef4444" stroke-width="8" stroke-opacity="0.4" />
+  
+  <!-- Outer Glow Circle -->
+  <circle cx="256" cy="256" r="170" fill="none" stroke="url(#redGrad)" stroke-width="12" />
+
+  <!-- Dumbbell / Weight Graphics -->
+  <g transform="translate(256, 256)">
+    <!-- Central Barbell Handle -->
+    <rect x="-110" y="-12" width="220" height="24" rx="6" fill="#f43f5e" />
+    <!-- Center Grip Textured -->
+    <rect x="-40" y="-14" width="80" height="28" rx="4" fill="#ffffff" />
+    <!-- Left Weight Plates -->
+    <rect x="-140" y="-60" width="24" height="120" rx="8" fill="url(#redGrad)" />
+    <rect x="-170" y="-85" width="22" height="170" rx="10" fill="#dc2626" stroke="#991b1b" stroke-width="3" />
+    <!-- Right Weight Plates -->
+    <rect x="116" y="-60" width="24" height="120" rx="8" fill="url(#redGrad)" />
+    <rect x="148" y="-85" width="22" height="170" rx="10" fill="#dc2626" stroke="#991b1b" stroke-width="3" />
+    
+    <!-- Shaker / Drink Silhouette in Center overlay -->
+    <path d="M -30,-90 L 30,-90 L 22,-10 L -22,-10 Z" fill="#ef4444" opacity="0.9" />
+    <rect x="-34" y="-102" width="68" height="12" rx="4" fill="#ffffff" />
+    <rect x="-14" y="-116" width="28" height="14" rx="4" fill="#ef4444" />
+    
+    <!-- Lightning Energy Accent -->
+    <polygon points="4,-65 -8,-45 0,-45 -4,-25 10,-50 0,-50" fill="#ffffff" />
+  </g>
+  
+  <!-- Text Label -->
+  <text x="256" y="445" font-family="system-ui, -apple-system, sans-serif" font-size="34" font-weight="900" fill="#f87171" text-anchor="middle" letter-spacing="4">ZAL BARI</text>
+</svg>

@@ -1,0 +1,304 @@
+import React from 'react';
+import {
+  LayoutDashboard,
+  ShoppingCart,
+  Package,
+  ArrowDownLeft,
+  BookOpen,
+  DollarSign,
+  Settings as SettingsIcon,
+  LogOut,
+  Sun,
+  Moon,
+  Dumbbell,
+  FileSpreadsheet,
+  Bell,
+  BellRing,
+} from 'lucide-react';
+import { useApp } from '../context/AppContext';
+import { PWAInstallButton } from './PWAInstallButton';
+
+export type NavTab =
+  | 'dashboard'
+  | 'pos'
+  | 'products'
+  | 'purchases'
+  | 'debts'
+  | 'daily-report'
+  | 'expenses'
+  | 'admin';
+
+interface NavigationProps {
+  activeTab: NavTab;
+  setActiveTab: (tab: NavTab) => void;
+}
+
+export const Sidebar: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) => {
+  const {
+    currentUser,
+    logout,
+    theme,
+    toggleTheme,
+    settings,
+    notificationPermission,
+    requestPushPermission,
+  } = useApp();
+  const isAdmin = currentUser?.role === 'admin';
+
+  const navItems: { id: NavTab; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
+    {
+      id: 'dashboard',
+      label: 'Xülasə (Dashboard)',
+      icon: <LayoutDashboard className="w-5 h-5" />,
+      adminOnly: true,
+    },
+    {
+      id: 'pos',
+      label: 'Satış (Kassa / POS)',
+      icon: <ShoppingCart className="w-5 h-5" />,
+    },
+    {
+      id: 'products',
+      label: 'Məhsullar və Depo',
+      icon: <Package className="w-5 h-5" />,
+    },
+    {
+      id: 'purchases',
+      label: 'Mal Qəbulu',
+      icon: <ArrowDownLeft className="w-5 h-5" />,
+      adminOnly: true,
+    },
+    {
+      id: 'debts',
+      label: 'Borclar',
+      icon: <BookOpen className="w-5 h-5" />,
+    },
+    {
+      id: 'daily-report',
+      label: 'Gündəlik Hesabat',
+      icon: <FileSpreadsheet className="w-5 h-5" />,
+    },
+    {
+      id: 'expenses',
+      label: 'Xərclər',
+      icon: <DollarSign className="w-5 h-5" />,
+      adminOnly: true,
+    },
+    {
+      id: 'admin',
+      label: 'Admin Paneli',
+      icon: <SettingsIcon className="w-5 h-5" />,
+      adminOnly: true,
+    },
+  ];
+
+  const visibleItems = navItems.filter(item => !item.adminOnly || isAdmin);
+
+  return (
+    <aside className="hidden lg:flex flex-col w-64 bg-zinc-950 text-zinc-100 border-r border-zinc-800/80 shrink-0 select-none">
+      {/* Brand Header */}
+      <div className="p-5 border-b border-zinc-800/80 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-red-600 to-rose-600 text-white flex items-center justify-center shadow-lg shadow-red-600/30 font-bold">
+            <Dumbbell className="w-6 h-6 stroke-[2.2]" />
+          </div>
+          <div>
+            <h1 className="text-base font-black text-white tracking-tight leading-tight">
+              {settings.barName}
+            </h1>
+            <p className="text-[11px] font-medium text-red-500">
+              İdarəetmə & POS
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Push Notification Quick Status Bar */}
+      {isAdmin && settings.enablePushNotifications && (
+        <div className="px-3 pt-3">
+          <button
+            onClick={() => requestPushPermission()}
+            className={`w-full py-1.5 px-3 rounded-xl text-[11px] font-semibold flex items-center justify-between transition-colors border ${
+              notificationPermission === 'granted'
+                ? 'bg-zinc-900 border-emerald-900/60 text-emerald-400'
+                : 'bg-red-950/40 border-red-800 text-red-300 hover:bg-red-900/50'
+            }`}
+            title="Qalıq minimum həddə çatanda brauzer bildirişi"
+          >
+            <div className="flex items-center gap-1.5">
+              <BellRing className="w-3.5 h-3.5 shrink-0" />
+              <span>Bildirişlər:</span>
+            </div>
+            <span className="font-bold">
+              {notificationPermission === 'granted' ? 'Aktiv' : 'İcazə Ver'}
+            </span>
+          </button>
+        </div>
+      )}
+
+      {/* Nav List */}
+      <nav className="flex-1 p-3 space-y-1.5 overflow-y-auto">
+        {visibleItems.map(item => {
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-medium text-sm transition-all text-left ${
+                isActive
+                  ? 'bg-red-600 text-white font-bold shadow-md shadow-red-600/30'
+                  : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
+              }`}
+            >
+              <span className={isActive ? 'text-white' : 'text-zinc-400'}>
+                {item.icon}
+              </span>
+              <span className="truncate">{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      {/* Bottom User & Theme Strip */}
+      <div className="p-3 border-t border-zinc-800/80 space-y-2">
+        {/* PWA Home Screen button in sidebar */}
+        <PWAInstallButton variant="full" />
+
+        <div className="flex items-center justify-between px-3 py-2 bg-zinc-900/80 rounded-xl border border-zinc-800/60">
+          <div className="flex items-center gap-2.5 overflow-hidden">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
+              isAdmin ? 'bg-red-950 text-red-400 border border-red-800/60' : 'bg-zinc-800 text-zinc-300'
+            }`}>
+              {currentUser?.name.charAt(0) || 'U'}
+            </div>
+            <div className="truncate">
+              <p className="text-xs font-bold text-white truncate">
+                {currentUser?.name}
+              </p>
+              <p className="text-[10px] uppercase font-semibold tracking-wider text-red-400">
+                {isAdmin ? 'Admin' : 'İşçi'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={toggleTheme}
+            aria-label="Rejimi dəyiş"
+            className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+            title={theme === 'dark' ? 'İşıqlı rejim' : 'Qaranlıq rejim'}
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-zinc-400" />}
+          </button>
+        </div>
+
+        <button
+          onClick={logout}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-950/40 rounded-xl transition-colors border border-transparent hover:border-red-900/50"
+        >
+          <LogOut className="w-4 h-4" />
+          <span>Sistemdən Çıxış</span>
+        </button>
+      </div>
+    </aside>
+  );
+};
+
+export const MobileHeader: React.FC<{
+  activeTab: NavTab;
+}> = ({ activeTab }) => {
+  const { currentUser, settings, theme, toggleTheme, logout } = useApp();
+  const isAdmin = currentUser?.role === 'admin';
+
+  const tabTitles: Record<NavTab, string> = {
+    dashboard: 'Xülasə',
+    pos: 'Kassa (POS)',
+    products: 'Məhsullar & Depo',
+    purchases: 'Mal Qəbulu',
+    debts: 'Borclar',
+    'daily-report': 'Gündəlik Hesabat',
+    expenses: 'Xərclər',
+    admin: 'Admin Paneli',
+  };
+
+  return (
+    <header className="lg:hidden sticky top-0 z-30 bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800/80 px-4 h-14 flex items-center justify-between text-white">
+      <div className="flex items-center gap-2.5">
+        <div className="w-8 h-8 rounded-lg bg-red-600 text-white flex items-center justify-center font-bold shadow-md shadow-red-600/30">
+          <Dumbbell className="w-4 h-4" />
+        </div>
+        <div>
+          <h2 className="text-sm font-bold text-white leading-tight">
+            {tabTitles[activeTab]}
+          </h2>
+          <p className="text-[10px] text-zinc-400">
+            {settings.barName} · <span className="text-red-400 font-semibold">{isAdmin ? 'Admin' : 'İşçi'}</span>
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5">
+        <PWAInstallButton variant="compact" />
+        <button
+          onClick={toggleTheme}
+          aria-label="Rejim"
+          className="p-2 text-zinc-300 rounded-lg hover:bg-zinc-800"
+        >
+          {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+        </button>
+        <button
+          onClick={logout}
+          aria-label="Çıxış"
+          className="p-2 text-red-400 rounded-lg hover:bg-red-950/40"
+          title="Çıxış"
+        >
+          <LogOut className="w-4 h-4" />
+        </button>
+      </div>
+    </header>
+  );
+};
+
+export const BottomNav: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) => {
+  const { currentUser } = useApp();
+  const isAdmin = currentUser?.role === 'admin';
+
+  const items = isAdmin
+    ? [
+        { id: 'dashboard' as NavTab, label: 'Xülasə', icon: <LayoutDashboard className="w-5 h-5" /> },
+        { id: 'pos' as NavTab, label: 'POS', icon: <ShoppingCart className="w-5 h-5" /> },
+        { id: 'products' as NavTab, label: 'Depo', icon: <Package className="w-5 h-5" /> },
+        { id: 'debts' as NavTab, label: 'Borclar', icon: <BookOpen className="w-5 h-5" /> },
+        { id: 'admin' as NavTab, label: 'Admin', icon: <SettingsIcon className="w-5 h-5" /> },
+      ]
+    : [
+        { id: 'pos' as NavTab, label: 'Kassa (POS)', icon: <ShoppingCart className="w-5 h-5" /> },
+        { id: 'debts' as NavTab, label: 'Borclar', icon: <BookOpen className="w-5 h-5" /> },
+        { id: 'daily-report' as NavTab, label: 'Hesabat', icon: <FileSpreadsheet className="w-5 h-5" /> },
+        { id: 'products' as NavTab, label: 'Məhsullar', icon: <Package className="w-5 h-5" /> },
+      ];
+
+  return (
+    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 pb-safe shadow-xl">
+      <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'} h-14 items-center px-1`}>
+        {items.map(item => {
+          const isActive = activeTab === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`flex flex-col items-center justify-center py-1 transition-all ${
+                isActive
+                  ? 'text-red-500 font-bold scale-105'
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              <div>{item.icon}</div>
+              <span className="text-[10px] font-medium tracking-tight mt-0.5 truncate max-w-[64px]">
+                {item.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+  );
+};
