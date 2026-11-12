@@ -43,6 +43,7 @@ import {
   checkDailyReportDiscrepancy,
   calculateDebtOverview,
   calculateCategoryBreakdown,
+  calculateFinancialMetricsForRange,
 } from '../utils/financialCalculations';
 import { exportSalesToCSV } from '../utils/exportUtils';
 
@@ -142,67 +143,46 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
     );
   }, [expenses, dateRange]);
 
-  // Collected debt payments in selected period (used for cash-flow insight, separate from product sales revenue)
-  const periodDebtPayments = useMemo(() => {
-    return debts
-      .flatMap(d => d.payments || [])
-      .filter(p => {
-        const dStr = (p.paidAt || p.date || '').split('T')[0];
-        return dStr >= dateRange.startDate && dStr <= dateRange.endDate;
-      });
-  }, [debts, dateRange]);
-
-  const periodDebtCollected = useMemo(
-    () => periodDebtPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0),
-    [periodDebtPayments]
+  // Unified authoritative financial metrics for the selected period
+  const periodMetrics = useMemo(
+    () =>
+      calculateFinancialMetricsForRange({
+        sales,
+        debts,
+        purchases,
+        expenses,
+        startDate: dateRange.startDate,
+        endDate: dateRange.endDate,
+      }),
+    [sales, debts, purchases, expenses, dateRange]
   );
+
+  // Collected debt payments count / total in selected period
+  const periodDebtCollected = periodMetrics.debtCollectedTotal;
 
   // Period Financials
-  const periodRevenue = useMemo(
-    () => periodSales.reduce((sum, s) => sum + s.totalAmount, 0),
-    [periodSales]
-  );
-  const periodPurchasesAmount = useMemo(
-    () => periodPurchases.reduce((sum, p) => sum + p.paidAmount, 0),
-    [periodPurchases]
-  );
-  const periodExpensesAmount = useMemo(
-    () => periodExpenses.reduce((sum, e) => sum + e.amount, 0),
-    [periodExpenses]
-  );
+  const periodRevenue = periodMetrics.grossSalesTotal;
+  const periodPurchasesAmount = periodMetrics.purchasesOutflow;
+  const periodExpensesAmount = periodMetrics.expensesOutflow;
   const periodProfit = useMemo(
     () => calculateNetProfit(periodRevenue, periodPurchasesAmount, periodExpensesAmount),
     [periodRevenue, periodPurchasesAmount, periodExpensesAmount]
   );
 
-  // Period Payments (Sales + Debt Collections for Cash Drawer Accuracy)
+  // Period Payments (Actual Cash Drawer Inflows vs Non-cash Balance & Unpaid Credit Sales)
   const periodPayments = useMemo(
     () => calculatePaymentBreakdown(periodSales),
     [periodSales]
   );
-  const debtPaymentsBreakdown = useMemo(() => {
-    let cash = 0;
-    let card = 0;
-    let pos = 0;
-    for (const p of periodDebtPayments) {
-      const amt = Number(p.amount) || 0;
-      const m = (p.paymentMethod || 'naqd').toLowerCase();
-      if (m === 'kart') card += amt;
-      else if (m === 'pos' || m === 'kocurme') pos += amt;
-      else cash += amt;
-    }
-    return { cash, card, pos };
-  }, [periodDebtPayments]);
-
-  const combinedCash = periodPayments.cash + debtPaymentsBreakdown.cash;
-  const combinedCard = periodPayments.card + debtPaymentsBreakdown.card;
-  const combinedPos = periodPayments.pos + debtPaymentsBreakdown.pos;
-  const totalPaid = combinedCash + combinedCard + combinedPos + periodPayments.balance;
+  const combinedCash = periodMetrics.drawerCashInflow;
+  const combinedCard = periodMetrics.drawerCardInflow;
+  const combinedPos = periodMetrics.drawerPosInflow;
+  const totalPaid = periodMetrics.actualDrawerInflow; // Only real cash/card/pos inflows (excludes credit & balance)
 
   const cashPct = totalPaid > 0 ? Math.round((combinedCash / totalPaid) * 100) : 0;
   const cardPct = totalPaid > 0 ? Math.round((combinedCard / totalPaid) * 100) : 0;
   const posPct = totalPaid > 0 ? Math.round((combinedPos / totalPaid) * 100) : 0;
-  const balancePct = totalPaid > 0 ? Math.round((periodPayments.balance / totalPaid) * 100) : 0;
+  const balancePct = periodRevenue > 0 ? Math.round((periodMetrics.balanceSales / periodRevenue) * 100) : 0;
 
   // Period Category & Product level breakdown
   const categorySummary = useMemo(
@@ -598,11 +578,11 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
         <div className="space-y-6">
           {/* Minimal KPI Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Period Sales Revenue */}
+            {/* Period Sales Revenue (Gross Sales including credit sales) */}
             <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/90 shadow-sm">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                  Dövrün Dövriyyəsi
+                  Ümumi Satış (Dövriyyə)
                 </span>
                 <div className="w-8 h-8 rounded-lg bg-red-50 dark:bg-red-950/80 text-red-600 dark:text-red-400 flex items-center justify-center border border-red-200 dark:border-red-900/60">
                   <TrendingUp className="w-4 h-4" />
@@ -612,36 +592,39 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
                 <div className="text-2xl font-black text-zinc-900 dark:text-white font-mono tracking-tight">
                   {formatAZN(periodRevenue)}
                 </div>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 flex items-center gap-1.5">
-                  <span>{periodSales.length} əməliyyat</span>
-                  <span aria-hidden="true">·</span>
-                  <span className="text-zinc-700 dark:text-zinc-300 font-semibold">{categorySummary.totalQuantity} ədəd məhsul</span>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 flex flex-wrap items-center gap-1.5">
+                  <span>{periodSales.length} satış ({categorySummary.totalQuantity} əd.)</span>
+                  {periodMetrics.creditSales > 0 && (
+                    <span className="text-rose-600 dark:text-rose-400 font-semibold">
+                      · Borcla: {formatAZN(periodMetrics.creditSales)}
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
 
-            {/* Net Profit */}
-            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/90 shadow-sm">
+            {/* Actual Cash Drawer Inflow & Net Cash Balance */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-emerald-200 dark:border-emerald-900/70 shadow-sm">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                  Xalis Mənfəət
+                <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">
+                  Faktiki Kassaya Girən
                 </span>
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center border ${
-                  periodProfit.isProfit
-                    ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/60'
-                    : 'bg-red-50 dark:bg-red-950/80 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/60'
-                }`}>
+                <div className="w-8 h-8 rounded-lg flex items-center justify-center border bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/60">
                   <DollarSign className="w-4 h-4" />
                 </div>
               </div>
               <div className="mt-3">
-                <div className={`text-2xl font-black font-mono tracking-tight ${
-                  periodProfit.isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
-                }`}>
-                  {formatAZN(periodProfit.netProfit)}
+                <div className="text-2xl font-black font-mono tracking-tight text-emerald-600 dark:text-emerald-400">
+                  {formatAZN(periodMetrics.actualDrawerInflow)}
                 </div>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                  Alış: {formatAZN(periodPurchasesAmount)} · Xərc: {formatAZN(periodExpensesAmount)}
+                  Xalis pul balansı:{' '}
+                  <strong className={periodMetrics.netCashBalance >= 0 ? 'text-zinc-800 dark:text-zinc-200 font-mono' : 'text-red-600 dark:text-red-400 font-mono'}>
+                    {formatAZN(periodMetrics.netCashBalance)}
+                  </strong>
+                  {periodDebtCollected > 0 && (
+                    <span className="text-amber-600 dark:text-amber-400 font-semibold"> · Borcdan: +{formatAZN(periodDebtCollected)}</span>
+                  )}
                 </p>
               </div>
             </div>
@@ -663,28 +646,34 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                   Borclu: <span className="font-semibold text-amber-600 dark:text-amber-400">{debtOverview.debtorCount} nəfər</span>
                   {periodDebtCollected > 0 && (
-                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold"> · Yığılıb: {formatAZN(periodDebtCollected)}</span>
+                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold"> · Geri alınıb: {formatAZN(periodDebtCollected)}</span>
                   )}
                 </p>
               </div>
             </div>
 
-            {/* Total Customer Deposit Balance */}
+            {/* Net Profit Card */}
             <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/90 shadow-sm">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
-                  Müştəri Depozitləri
+                  Xalis Mənfəət (Gəlir − Xərc)
                 </span>
-                <div className="w-8 h-8 rounded-lg bg-cyan-50 dark:bg-cyan-950/80 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-200 dark:border-cyan-900/60">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center border ${
+                  periodProfit.isProfit
+                    ? 'bg-cyan-50 dark:bg-cyan-950/80 text-cyan-600 dark:text-cyan-400 border-cyan-200 dark:border-cyan-900/60'
+                    : 'bg-red-50 dark:bg-red-950/80 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/60'
+                }`}>
                   <Wallet className="w-4 h-4" />
                 </div>
               </div>
               <div className="mt-3">
-                <div className="text-2xl font-black text-cyan-600 dark:text-cyan-400 font-mono tracking-tight">
-                  {formatAZN(totalCustomerBalance)}
+                <div className={`text-2xl font-black font-mono tracking-tight ${
+                  periodProfit.isProfit ? 'text-cyan-600 dark:text-cyan-400' : 'text-red-600 dark:text-red-400'
+                }`}>
+                  {formatAZN(periodProfit.netProfit)}
                 </div>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                  Cəmi qəbul edilən: <span className="font-semibold text-zinc-700 dark:text-zinc-300">{formatAZN(totalDepositedAllTime)}</span>
+                  Alış: {formatAZN(periodPurchasesAmount)} · Xərc: {formatAZN(periodExpensesAmount)}
                 </p>
               </div>
             </div>
@@ -844,10 +833,10 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
                 <div className="flex items-center gap-2">
                   <CreditCard className="w-4 h-4 text-red-500" />
                   <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
-                    Ödəniş Növləri Bölgüsü (Satış + Borc Daxilolmaları)
+                    Faktiki Kassa Daxilolmaları (Nağd / Kart / POS)
                   </h3>
                 </div>
-                <span className="text-xs font-mono text-zinc-500 dark:text-zinc-400">
+                <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
                   {formatAZN(totalPaid)}
                 </span>
               </div>
@@ -898,18 +887,23 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
                   </div>
                 </div>
 
-                {/* Balance (Deposit) */}
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
-                      <Wallet className="w-3.5 h-3.5 text-cyan-500 dark:text-cyan-400" /> Müştəri Balansı
+                {/* Non-drawer items separated clearly */}
+                <div className="pt-2.5 mt-2 border-t border-zinc-200 dark:border-zinc-800 space-y-2 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-rose-700 dark:text-rose-400 font-semibold">
+                      Borcla Satış (Kassaya əlavə edilmir):
                     </span>
-                    <span className="font-mono font-bold text-zinc-900 dark:text-white">
-                      {formatAZN(periodPayments.balance)} ({balancePct}%)
+                    <span className="font-mono font-bold text-rose-700 dark:text-rose-400">
+                      {formatAZN(periodMetrics.creditSales)}
                     </span>
                   </div>
-                  <div className="h-1.5 bg-zinc-100 dark:bg-zinc-950 rounded-full overflow-hidden">
-                    <div className="h-full bg-cyan-500" style={{ width: `${balancePct}%` }} />
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-600 dark:text-zinc-400 flex items-center gap-1.5">
+                      <Wallet className="w-3.5 h-3.5 text-cyan-500 dark:text-cyan-400" /> Müştəri Balansından ({balancePct}%):
+                    </span>
+                    <span className="font-mono font-bold text-cyan-700 dark:text-cyan-400">
+                      {formatAZN(periodPayments.balance)}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1203,13 +1197,87 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
          ───────────────────────────────────────────────────────── */}
       {activeSubTab === 'finance' && (
         <div className="space-y-6 animate-in fade-in">
-          {/* Net Profit Mathematical Formula Card */}
+          {/* Real Cash Balance Card (Actual Cash Inflow - Actual Cash Outflow) */}
+          <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-emerald-200 dark:border-emerald-900/60 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-zinc-200 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <Banknote className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                <div>
+                  <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                    Kassanın Faktiki Pul Balansı (Real Daxil Olan − Çıxan)
+                  </h3>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    Borcla satış ({formatAZN(periodMetrics.creditSales)}) ödənilənə qədər faktiki kassa balansına daxil edilmir
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                {dateRange.label}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
+              <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-center">
+                <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider block">
+                  Satışdan Real Daxilolma
+                </span>
+                <span className="text-xl font-black text-zinc-900 dark:text-white font-mono mt-1 block">
+                  {formatAZN(periodMetrics.salesRealInflow)}
+                </span>
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                  Nağd + Kart + POS
+                </span>
+              </div>
+
+              <div className="p-4 rounded-xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 text-center">
+                <span className="text-xs font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider block">
+                  Geri Alınan Borclar (+)
+                </span>
+                <span className="text-xl font-black text-amber-700 dark:text-amber-400 font-mono mt-1 block">
+                  +{formatAZN(periodMetrics.debtCollectedTotal)}
+                </span>
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                  {periodMetrics.debtCollectedCount} borc ödənişi qəbulu
+                </span>
+              </div>
+
+              <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-center">
+                <span className="text-xs font-bold text-red-600 dark:text-red-400 uppercase tracking-wider block">
+                  Çıxan Pullar (Alış + Xərc) (−)
+                </span>
+                <span className="text-xl font-black text-red-600 dark:text-red-400 font-mono mt-1 block">
+                  − {formatAZN(periodMetrics.totalCashOutflow)}
+                </span>
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                  Alış: {formatAZN(periodPurchasesAmount)} · Xərc: {formatAZN(periodExpensesAmount)}
+                </span>
+              </div>
+
+              <div className={`p-4 rounded-xl border text-center ${
+                periodMetrics.netCashBalance >= 0
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                  : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+              }`}>
+                <span className="text-xs font-bold uppercase tracking-wider block">
+                  Faktiki Kassa Pul Qalığı (=)
+                </span>
+                <span className="text-2xl font-black font-mono mt-1 block">
+                  {formatAZN(periodMetrics.netCashBalance)}
+                </span>
+                <span className="text-[11px] font-mono">
+                  Cəmi daxil: {formatAZN(periodMetrics.actualDrawerInflow)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Net Profit Mathematical Formula Card (Accrual: includes credit sales as earned revenue) */}
           <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-zinc-200 dark:border-zinc-800">
               <div className="flex items-center gap-2">
                 <DollarSign className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                 <h3 className="text-base font-bold text-zinc-900 dark:text-white">
-                  Dövrün Maliyyə Nəticəsi və Xalis Mənfəət
+                  Dövrün Ümumi Satış Gəliri və Xalis Mənfəət
                 </h3>
               </div>
               <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
@@ -1222,13 +1290,13 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
               {/* Revenue */}
               <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-center">
                 <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block">
-                  Satış Gəliri (+)
+                  Ümumi Satış Gəliri (+)
                 </span>
                 <span className="text-xl font-black text-zinc-900 dark:text-white font-mono mt-1 block">
                   {formatAZN(periodRevenue)}
                 </span>
                 <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                  {periodSales.length} təsdiqlənmiş satış
+                  {periodSales.length} satış (Borcla: {formatAZN(periodMetrics.creditSales)})
                 </span>
               </div>
 

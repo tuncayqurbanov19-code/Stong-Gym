@@ -9,14 +9,28 @@ import {
   CreditCard,
   Smartphone,
   Info,
+  TrendingUp,
+  BookOpen,
+  Wallet,
+  ArrowDownLeft,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { formatAZN, formatDateAZ, getTodayISODate, getCurrentMonthKey } from '../utils/dateUtils';
+import { calculateFinancialMetricsForRange } from '../utils/financialCalculations';
 import { exportDailyReportsToCSV } from '../utils/exportUtils';
 import { StaffPaymentBreakdown } from '../components/StaffPaymentBreakdown';
 
 export const DailyReportView: React.FC = () => {
-  const { dailyReports, sales, debts, saveDailyReport, currentUser, settings } = useApp();
+  const {
+    dailyReports,
+    sales,
+    debts,
+    purchases,
+    expenses,
+    saveDailyReport,
+    currentUser,
+    settings,
+  } = useApp();
   const isAdmin = currentUser?.role === 'admin';
 
   const todayISO = getTodayISODate();
@@ -30,54 +44,33 @@ export const DailyReportView: React.FC = () => {
   const [reportNotes, setReportNotes] = useState('');
   const [isSavedSuccess, setIsSavedSuccess] = useState(false);
 
+  // Unified authoritative metrics for selectedDate
+  const dayMetrics = useMemo(
+    () =>
+      calculateFinancialMetricsForRange({
+        sales,
+        debts,
+        purchases,
+        expenses,
+        startDate: selectedDate,
+        endDate: selectedDate,
+      }),
+    [sales, debts, purchases, expenses, selectedDate]
+  );
+
   // Calculate expected inflows for selectedDate (Sales + Debt Collections, without double counting)
-  const dayInflowStats = useMemo(() => {
-    const daySales = sales.filter(
-      s =>
-        s.date === selectedDate &&
-        s.isConfirmed &&
-        s.paymentType !== 'borc' &&
-        s.paymentType !== 'balans'
-    );
-    const salesCash = daySales
-      .filter(s => s.paymentType === 'naqd')
-      .reduce((sum, s) => sum + s.totalAmount, 0);
-    const salesCard = daySales
-      .filter(s => s.paymentType === 'kart')
-      .reduce((sum, s) => sum + s.totalAmount, 0);
-    const salesPos = daySales
-      .filter(s => s.paymentType === 'pos')
-      .reduce((sum, s) => sum + s.totalAmount, 0);
-
-    const dayDebtPayments = debts
-      .flatMap(d => d.payments || [])
-      .filter(p => (p.paidAt || p.date || '').split('T')[0] === selectedDate);
-
-    let debtCash = 0;
-    let debtCard = 0;
-    let debtPos = 0;
-    for (const p of dayDebtPayments) {
-      const amt = Number(p.amount) || 0;
-      const m = (p.paymentMethod || 'naqd').toLowerCase();
-      if (m === 'kart') debtCard += amt;
-      else if (m === 'pos' || m === 'kocurme') debtPos += amt;
-      else debtCash += amt;
-    }
-
-    const salesTotal = Math.round((salesCash + salesCard + salesPos) * 100) / 100;
-    const debtTotal = Math.round((debtCash + debtCard + debtPos) * 100) / 100;
-    const expectedTotal = Math.round((salesTotal + debtTotal) * 100) / 100;
-
-    return {
-      expectedCash: Math.round((salesCash + debtCash) * 100) / 100,
-      expectedCard: Math.round((salesCard + debtCard) * 100) / 100,
-      expectedPos: Math.round((salesPos + debtPos) * 100) / 100,
-      salesTotal,
-      debtTotal,
-      debtPaymentsCount: dayDebtPayments.length,
-      expectedTotal,
-    };
-  }, [sales, debts, selectedDate]);
+  const dayInflowStats = useMemo(
+    () => ({
+      expectedCash: dayMetrics.drawerCashInflow,
+      expectedCard: dayMetrics.drawerCardInflow,
+      expectedPos: dayMetrics.drawerPosInflow,
+      salesTotal: dayMetrics.salesRealInflow,
+      debtTotal: dayMetrics.debtCollectedTotal,
+      debtPaymentsCount: dayMetrics.debtCollectedCount,
+      expectedTotal: dayMetrics.actualDrawerInflow,
+    }),
+    [dayMetrics]
+  );
 
   // Load or calculate values for selectedDate
   useEffect(() => {
@@ -136,7 +129,7 @@ export const DailyReportView: React.FC = () => {
             </span>
           </h2>
           <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
-            Hər gün üzrə Nağd, Kart, POS gəlirləri, məsul bölgüsü və qəbul edilən borc ödənişləri
+            Ümumi satış, nağd/kart, borcla satış və faktiki kassaya daxil olan pulun dəqiq ayrılması
           </p>
         </div>
 
@@ -150,6 +143,136 @@ export const DailyReportView: React.FC = () => {
           </button>
         )}
       </div>
+
+      {/* Separated Daily Summary Strip: Sales vs Credit vs Actual Cash Drawer */}
+      <section className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-xs font-extrabold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+            {formatDateAZ(selectedDate)} — Satış, Borc və Faktiki Kassa Ayırımı
+          </h3>
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+            Borcla satış kassaya əlavə edilmir; yalnız faktiki ödənilən pullar kassanı artırır
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3">
+          {/* 1. Ümumi Satış Məbləği */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                Ümumi Satış
+              </span>
+              <TrendingUp className="w-3.5 h-3.5 text-zinc-400" />
+            </div>
+            <div className="text-lg font-black font-mono text-zinc-900 dark:text-white mt-1.5">
+              {formatAZN(dayMetrics.grossSalesTotal)}
+            </div>
+            <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+              {dayMetrics.salesCount} satış (Nisyə daxil)
+            </div>
+          </div>
+
+          {/* 2. Nağd Satış Məbləği */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                Nağd Satış
+              </span>
+              <Banknote className="w-3.5 h-3.5 text-emerald-500" />
+            </div>
+            <div className="text-lg font-black font-mono text-emerald-700 dark:text-emerald-400 mt-1.5">
+              {formatAZN(dayMetrics.cashSales)}
+            </div>
+            <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+              {dayMetrics.debtCollectedCash > 0
+                ? `+${formatAZN(dayMetrics.debtCollectedCash)} borcdan`
+                : 'Birbaşa nağd satış'}
+            </div>
+          </div>
+
+          {/* 3. Kartla Satış Məbləği */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                Kartla Satış
+              </span>
+              <CreditCard className="w-3.5 h-3.5 text-blue-500" />
+            </div>
+            <div className="text-lg font-black font-mono text-blue-700 dark:text-blue-400 mt-1.5">
+              {formatAZN(dayMetrics.cardSales)}
+            </div>
+            <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+              POS: <span className="font-mono font-semibold">{formatAZN(dayMetrics.posSales)}</span>
+            </div>
+          </div>
+
+          {/* 4. Borcla Satış Məbləği */}
+          <div className="p-4 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 shadow-sm">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400">
+                Borcla Satış
+              </span>
+              <BookOpen className="w-3.5 h-3.5 text-rose-500" />
+            </div>
+            <div className="text-lg font-black font-mono text-rose-700 dark:text-rose-400 mt-1.5">
+              {formatAZN(dayMetrics.creditSales)}
+            </div>
+            <div className="text-[10px] text-rose-700/80 dark:text-rose-300/80 mt-0.5 font-semibold">
+              Kassaya əlavə olunmur
+            </div>
+          </div>
+
+          {/* 5. Geri Alınan Borc */}
+          <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 shadow-sm">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                Geri Alınan Borc
+              </span>
+              <ArrowDownLeft className="w-3.5 h-3.5 text-amber-500" />
+            </div>
+            <div className="text-lg font-black font-mono text-amber-700 dark:text-amber-400 mt-1.5">
+              {formatAZN(dayMetrics.debtCollectedTotal)}
+            </div>
+            <div className="text-[10px] text-amber-700/80 dark:text-amber-300/80 mt-0.5">
+              {dayMetrics.debtCollectedCount} ödəniş (Kassaya əlavə)
+            </div>
+          </div>
+
+          {/* 6. Faktiki Kassaya Daxil Olan Pul */}
+          <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 shadow-sm">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                Faktiki Kassaya Girən
+              </span>
+              <Wallet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <div className="text-lg font-black font-mono text-emerald-800 dark:text-emerald-300 mt-1.5">
+              {formatAZN(dayMetrics.actualDrawerInflow)}
+            </div>
+            <div className="text-[10px] text-emerald-800/80 dark:text-emerald-400/80 mt-0.5 font-mono">
+              {dayMetrics.totalCashOutflow > 0
+                ? `Xalis: ${formatAZN(dayMetrics.netCashBalance)}`
+                : 'Nağd+Kart+POS+Borc ödənişi'}
+            </div>
+          </div>
+
+          {/* 7. Ödənilməmiş Borcların Ümumi Məbləği */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm col-span-2 md:col-span-1">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                Ümumi Qalıq Borc
+              </span>
+              <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+            </div>
+            <div className="text-lg font-black font-mono text-red-600 dark:text-red-400 mt-1.5">
+              {formatAZN(dayMetrics.totalUnpaidDebts)}
+            </div>
+            <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+              Ödənilməmiş borcların cəmi
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Staff × Payment Method Breakdown Section */}
       <StaffPaymentBreakdown defaultDate={selectedDate} />

@@ -98,6 +98,156 @@ export function calculatePaymentBreakdown(sales: Sale[]): PaymentBreakdown {
   return result;
 }
 
+export interface FinancialMetricsSummary {
+  startDate: string;
+  endDate: string;
+  // Satışlar (Gəlir tərəfi)
+  grossSalesTotal: number;      // Ümumi satış məbləği (Nağd + Kart + POS + Balans + Borc)
+  salesCount: number;
+  cashSales: number;            // Nağd satış məbləği
+  cardSales: number;            // Kartla satış məbləği
+  posSales: number;             // POS/Köçürmə satış məbləği
+  balanceSales: number;         // Müştəri depozit balansından satış (kassaya yeni pul girmir)
+  creditSales: number;          // Borcla satış məbləği (kassaya əlavə edilmir!)
+  salesRealInflow: number;      // Satışdan faktiki kassaya girən (Nağd + Kart + POS)
+
+  // Geri alınan borclar (Ödənilmə tarixinə görə kassaya əlavə olunur)
+  debtCollectedTotal: number;   // Seçilmiş dövrdə geri qaytarılan borc məbləği
+  debtCollectedCash: number;
+  debtCollectedCard: number;
+  debtCollectedPos: number;
+  debtCollectedCount: number;
+
+  // Kassanın faktiki daxilolmaları (Metod üzrə)
+  drawerCashInflow: number;     // cashSales + debtCollectedCash
+  drawerCardInflow: number;     // cardSales + debtCollectedCard
+  drawerPosInflow: number;      // posSales + debtCollectedPos
+  actualDrawerInflow: number;   // Faktiki kassaya daxil olan pul (salesRealInflow + debtCollectedTotal)
+
+  // Çıxan pullar və Xalis Kassa Balansı
+  purchasesOutflow: number;     // Mal alışına gedən pul
+  expensesOutflow: number;      // Digər xərclər
+  totalCashOutflow: number;     // Cəmi çıxan pul
+  netCashBalance: number;       // Kassanın faktiki xalis balansı (actualDrawerInflow - totalCashOutflow)
+
+  // Ümumi sistem üzrə ödənilməmiş borclar
+  totalUnpaidDebts: number;     // Hal-hazırda ödənilməmiş borcların ümumi qalıq məbləği
+}
+
+/**
+ * Authoritative financial calculation shared across POS, Daily Report, and Dashboard.
+ * Rules:
+ * 1. Gross sales include all confirmed sales (including credit/'borc' as revenue).
+ * 2. Credit sales ('borc') NEVER enter actual cash drawer inflow when created.
+ * 3. Debt collections enter actual cash drawer inflow on the exact `paidAt` date, separated cleanly as `debtCollectedTotal`.
+ * 4. Net cash balance = actualDrawerInflow - (purchases + expenses).
+ */
+export function calculateFinancialMetricsForRange(params: {
+  sales: Sale[];
+  debts: DebtRecord[];
+  purchases?: PurchaseIntake[];
+  expenses?: Expense[];
+  startDate: string;
+  endDate: string;
+  includeUnconfirmedSales?: boolean;
+}): FinancialMetricsSummary {
+  const {
+    sales,
+    debts,
+    purchases = [],
+    expenses = [],
+    startDate,
+    endDate,
+    includeUnconfirmedSales = false,
+  } = params;
+
+  const filteredSales = sales.filter(
+    s =>
+      s.date >= startDate &&
+      s.date <= endDate &&
+      (includeUnconfirmedSales || s.isConfirmed)
+  );
+
+  const breakdown = calculatePaymentBreakdown(filteredSales);
+  const round2 = (v: number) => Math.round(v * 100) / 100;
+
+  const salesRealInflow = round2(breakdown.cash + breakdown.card + breakdown.pos);
+
+  let debtCollectedCash = 0;
+  let debtCollectedCard = 0;
+  let debtCollectedPos = 0;
+  let debtCollectedCount = 0;
+
+  for (const debt of debts) {
+    for (const p of debt.payments || []) {
+      const paidDate = (p.paidAt || p.date || '').split('T')[0];
+      if (!paidDate || paidDate < startDate || paidDate > endDate) continue;
+
+      const amt = Number(p.amount) || 0;
+      if (amt <= 0) continue;
+
+      debtCollectedCount += 1;
+      const m = (p.paymentMethod || 'naqd').toLowerCase();
+      if (m === 'kart') debtCollectedCard += amt;
+      else if (m === 'pos' || m === 'kocurme') debtCollectedPos += amt;
+      else debtCollectedCash += amt;
+    }
+  }
+
+  const debtCollectedTotal = round2(debtCollectedCash + debtCollectedCard + debtCollectedPos);
+  const drawerCashInflow = round2(breakdown.cash + debtCollectedCash);
+  const drawerCardInflow = round2(breakdown.card + debtCollectedCard);
+  const drawerPosInflow = round2(breakdown.pos + debtCollectedPos);
+  const actualDrawerInflow = round2(salesRealInflow + debtCollectedTotal);
+
+  const purchasesOutflow = round2(
+    purchases
+      .filter(p => p.date >= startDate && p.date <= endDate)
+      .reduce((sum, p) => sum + (Number(p.paidAmount) || 0), 0)
+  );
+  const expensesOutflow = round2(
+    expenses
+      .filter(e => e.date >= startDate && e.date <= endDate)
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
+  );
+  const totalCashOutflow = round2(purchasesOutflow + expensesOutflow);
+  const netCashBalance = round2(actualDrawerInflow - totalCashOutflow);
+
+  const totalUnpaidDebts = round2(
+    debts
+      .filter(d => (d.status === 'borcdadir' || d.status === 'qismen') && Number(d.remainingAmount) > 0)
+      .reduce((sum, d) => sum + (Number(d.remainingAmount) || 0), 0)
+  );
+
+  return {
+    startDate,
+    endDate,
+    grossSalesTotal: round2(breakdown.total),
+    salesCount: filteredSales.length,
+    cashSales: round2(breakdown.cash),
+    cardSales: round2(breakdown.card),
+    posSales: round2(breakdown.pos),
+    balanceSales: round2(breakdown.balance),
+    creditSales: round2(breakdown.debt),
+    salesRealInflow,
+    debtCollectedTotal,
+    debtCollectedCash: round2(debtCollectedCash),
+    debtCollectedCard: round2(debtCollectedCard),
+    debtCollectedPos: round2(debtCollectedPos),
+    debtCollectedCount,
+    drawerCashInflow,
+    drawerCardInflow,
+    drawerPosInflow,
+    actualDrawerInflow,
+    purchasesOutflow,
+    expensesOutflow,
+    totalCashOutflow,
+    netCashBalance,
+    totalUnpaidDebts,
+  };
+}
+
+
 /**
  * Calculates category breakdown and product level details for given sales
  * (e.g. Su: 14.80 AZN (68%) / 12 pcs, with detailed products list inside)

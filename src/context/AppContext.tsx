@@ -937,16 +937,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const syncDailyReportForDate = (
     date: string,
     additionalSale?: Sale,
-    overrideDebts?: DebtRecord[]
+    overrideDebts?: DebtRecord[],
+    overrideSales?: Sale[]
   ) => {
     const activeDebts = overrideDebts || debts;
+    const baseSales = overrideSales || sales;
     const allDebtPaymentsForDay = activeDebts.flatMap(d =>
       (d.payments || []).filter(p => (p.paidAt || p.date || '').split('T')[0] === date)
     );
 
     setDailyReports(prev => {
       const existing = prev.find(r => r.date === date);
-      const allSalesForDay = [...sales, ...(additionalSale ? [additionalSale] : [])].filter(
+      const combinedSales = additionalSale
+        ? [additionalSale, ...baseSales.filter(s => s.id !== additionalSale.id)]
+        : baseSales;
+      const allSalesForDay = combinedSales.filter(
         s => s.date === date && s.isConfirmed && s.paymentType !== 'borc' && s.paymentType !== 'balans'
       );
 
@@ -1231,7 +1236,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Sync daily report (Nağd, Kart, POS are recorded; Borc and Balans are excluded from today's physical drawer)
     if (isConfirmed && saleData.paymentType !== 'borc' && saleData.paymentType !== 'balans') {
-      syncDailyReportForDate(date, newSale);
+      syncDailyReportForDate(date, newSale, undefined, updatedSales);
     }
 
     // CHECK STOCK & TRIGGER BROWSER PUSH NOTIFICATION IF STOCK <= THRESHOLD!
@@ -1267,58 +1272,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const confirmSale = (saleId: string) => {
-    setSales(prev =>
-      prev.map(s => {
-        if (s.id === saleId) {
-          const updated = {
-            ...s,
-            isConfirmed: true,
-            confirmedAt: new Date().toISOString(),
-            confirmedBy: currentUser?.username || 'admin',
-          };
-          syncDailyReportForDate(updated.date, updated);
+    const target = sales.find(s => s.id === saleId);
+    if (!target) return;
 
-          const supabase = getSupabaseClient();
-          if (supabase) {
-            safeDbExec(supabase.from('sales').update({
-              is_confirmed: true,
-              confirmed_at: updated.confirmedAt,
-              confirmed_by: updated.confirmedBy,
-            }).eq('id', saleId));
-          }
+    const updatedSale: Sale = {
+      ...target,
+      isConfirmed: true,
+      confirmedAt: new Date().toISOString(),
+      confirmedBy: currentUser?.username || 'admin',
+    };
+    const nextSales = sales.map(s => (s.id === saleId ? updatedSale : s));
+    setSales(nextSales);
+    syncDailyReportForDate(updatedSale.date, updatedSale, undefined, nextSales);
 
-          return updated;
-        }
-        return s;
-      })
-    );
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(
+        supabase
+          .from('sales')
+          .update({
+            is_confirmed: true,
+            confirmed_at: updatedSale.confirmedAt,
+            confirmed_by: updatedSale.confirmedBy,
+          })
+          .eq('id', saleId)
+      );
+    }
+
     addAuditLog('Satış Təsdiqləndi', `Satış ID: ${saleId} təsdiqləndi.`);
   };
 
   const confirmDaySales = (date: string) => {
-    setSales(prev =>
-      prev.map(s => {
-        if (s.date === date && !s.isConfirmed) {
-          const updated = {
-            ...s,
-            isConfirmed: true,
-            confirmedAt: new Date().toISOString(),
-            confirmedBy: currentUser?.username || 'admin',
-          };
-          const supabase = getSupabaseClient();
-          if (supabase) {
-            safeDbExec(supabase.from('sales').update({
-              is_confirmed: true,
-              confirmed_at: updated.confirmedAt,
-              confirmed_by: updated.confirmedBy,
-            }).eq('id', s.id));
-          }
-          return updated;
+    const supabase = getSupabaseClient();
+    const nextSales = sales.map(s => {
+      if (s.date === date && !s.isConfirmed) {
+        const updated: Sale = {
+          ...s,
+          isConfirmed: true,
+          confirmedAt: new Date().toISOString(),
+          confirmedBy: currentUser?.username || 'admin',
+        };
+        if (supabase) {
+          safeDbExec(
+            supabase
+              .from('sales')
+              .update({
+                is_confirmed: true,
+                confirmed_at: updated.confirmedAt,
+                confirmed_by: updated.confirmedBy,
+              })
+              .eq('id', s.id)
+          );
         }
-        return s;
-      })
-    );
-    syncDailyReportForDate(date);
+        return updated;
+      }
+      return s;
+    });
+    setSales(nextSales);
+    syncDailyReportForDate(date, undefined, undefined, nextSales);
     addAuditLog('Günlük Satışlar Təsdiqləndi', `${date} tarixinə aid satışlar təsdiqləndi.`);
   };
 
@@ -1328,14 +1339,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('error', 'İcazə yoxdur: Yalnız Admin satışları silə bilər!');
       return;
     }
-    const s = sales.find(x => x.id === saleId);
-    setSales(prev => prev.filter(x => x.id !== saleId));
-    if (s) {
-      syncDailyReportForDate(s.date);
+    const targetSale = sales.find(x => x.id === saleId);
+    const nextSales = sales.filter(x => x.id !== saleId);
+    setSales(nextSales);
+
+    // If an unpaid credit sale is deleted, also remove its linked unpaid debt record to stay consistent
+    let nextDebts = debts;
+    const linkedUnpaidDebt = debts.find(
+      d => d.saleId === saleId && (Number(d.paidAmount) || 0) === 0
+    );
+    const supabase = getSupabaseClient();
+    if (linkedUnpaidDebt) {
+      nextDebts = debts.filter(d => d.id !== linkedUnpaidDebt.id);
+      setDebts(nextDebts);
+      if (supabase) {
+        safeDbExec(supabase.from('debts').delete().eq('id', linkedUnpaidDebt.id));
+      }
+    }
+
+    if (targetSale) {
+      syncDailyReportForDate(targetSale.date, undefined, nextDebts, nextSales);
     }
     addAuditLog('Satış Silindi', `Satış ID: ${saleId} silindi.`);
 
-    const supabase = getSupabaseClient();
     if (supabase) {
       safeDbExec(supabase.from('sales').delete().eq('id', saleId));
     }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ShoppingCart,
   Plus,
@@ -30,7 +30,7 @@ import {
   getMonthLabelAZ,
 } from '../utils/dateUtils';
 import { calculateProductStock } from '../utils/stockCalculations';
-import { checkCustomerDebt } from '../utils/financialCalculations';
+import { calculateFinancialMetricsForRange, checkCustomerDebt } from '../utils/financialCalculations';
 import { BarcodeScannerModal } from '../components/BarcodeScannerModal';
 import { DebtWarningModal } from '../components/DebtWarningModal';
 import { exportSalesToCSV } from '../utils/exportUtils';
@@ -44,6 +44,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
   const {
     products,
     purchases,
+    expenses,
     sales,
     debts,
     customerAccounts,
@@ -236,14 +237,37 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     return matchesSearch && matchesCat;
   });
 
+  // Live Today & Selected Day separated financial metrics (Sale vs Credit vs Actual Cash)
+  const todayISO = getTodayISODate();
+  const todayMetrics = useMemo(
+    () =>
+      calculateFinancialMetricsForRange({
+        sales,
+        debts,
+        purchases,
+        expenses,
+        startDate: todayISO,
+        endDate: todayISO,
+      }),
+    [sales, debts, purchases, expenses, todayISO]
+  );
+
+  const selectedDayMetrics = useMemo(
+    () =>
+      calculateFinancialMetricsForRange({
+        sales,
+        debts,
+        purchases,
+        expenses,
+        startDate: selectedDay,
+        endDate: selectedDay,
+      }),
+    [sales, debts, purchases, expenses, selectedDay]
+  );
+
   // Daily Sales Summary calculations
   const daySales = sales.filter(s => s.date === selectedDay);
   const dayConfirmed = daySales.length > 0 && daySales.every(s => s.isConfirmed);
-  const dayTotalAmount = daySales.reduce((sum, s) => sum + s.totalAmount, 0);
-  const dayDebtPaymentsTotal = debts
-    .flatMap(d => d.payments || [])
-    .filter(p => (p.paidAt || p.date || '').split('T')[0] === selectedDay)
-    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
   // Daily product breakdown
   const dailyProductStats: Record<string, { name: string; quantity: number; revenue: number }> = {};
@@ -332,7 +356,65 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
           SUB-TAB 1: POS TERMINAL
          ───────────────────────────────────────────────────────── */}
       {activeSubTab === 'pos' && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        <div className="space-y-4">
+          {/* Live Today Cash vs Credit Separation Strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+            <div className="p-3 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
+                Bugünkü Ümumi Satış
+              </span>
+              <span className="text-base font-black font-mono text-zinc-900 dark:text-white mt-0.5 block">
+                {formatAZN(todayMetrics.grossSalesTotal)}
+              </span>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
+                Nağd Satış
+              </span>
+              <span className="text-base font-black font-mono text-emerald-700 dark:text-emerald-400 mt-0.5 block">
+                {formatAZN(todayMetrics.cashSales)}
+              </span>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 block">
+                Kart / POS Satış
+              </span>
+              <span className="text-base font-black font-mono text-blue-700 dark:text-blue-400 mt-0.5 block">
+                {formatAZN(todayMetrics.cardSales + todayMetrics.posSales)}
+              </span>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400 block">
+                Borcla Satış (Kassasız)
+              </span>
+              <span className="text-base font-black font-mono text-rose-700 dark:text-rose-400 mt-0.5 block">
+                {formatAZN(todayMetrics.creditSales)}
+              </span>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 block">
+                Geri Alınan Borc
+              </span>
+              <span className="text-base font-black font-mono text-amber-700 dark:text-amber-400 mt-0.5 block">
+                {formatAZN(todayMetrics.debtCollectedTotal)}
+              </span>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 shadow-xs">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 block">
+                Faktiki Kassaya Girən
+              </span>
+              <span className="text-base font-black font-mono text-emerald-800 dark:text-emerald-300 mt-0.5 block">
+                {formatAZN(todayMetrics.actualDrawerInflow)}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left Column: Product Selection Grid */}
           <div className="lg:col-span-7 xl:col-span-8 space-y-4">
             {/* Search and Barcode row */}
@@ -746,6 +828,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
             </button>
           </div>
         </div>
+        </div>
       )}
 
       {/* ─────────────────────────────────────────────────────────
@@ -769,13 +852,20 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
             <div className="flex items-center gap-4">
               <div className="text-right">
-                <span className="text-xs text-zinc-500 dark:text-zinc-400 block">Günlük Cəm Satış</span>
-                <span className="text-xl font-black font-mono text-zinc-900 dark:text-white">
-                  {formatAZN(dayTotalAmount)}
+                <span className="text-xs text-zinc-500 dark:text-zinc-400 block">
+                  Ümumi Satış / Faktiki Kassa
                 </span>
-                {dayDebtPaymentsTotal > 0 && (
-                  <span className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 block font-semibold">
-                    + Borcdan yığılan: {formatAZN(dayDebtPaymentsTotal)}
+                <div className="flex items-baseline justify-end gap-2">
+                  <span className="text-xl font-black font-mono text-zinc-900 dark:text-white">
+                    {formatAZN(selectedDayMetrics.grossSalesTotal)}
+                  </span>
+                  <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                    (Kassa: {formatAZN(selectedDayMetrics.actualDrawerInflow)})
+                  </span>
+                </div>
+                {selectedDayMetrics.debtCollectedTotal > 0 && (
+                  <span className="text-[11px] font-mono text-amber-600 dark:text-amber-400 block font-semibold">
+                    Geri alınan borc: +{formatAZN(selectedDayMetrics.debtCollectedTotal)}
                   </span>
                 )}
               </div>
@@ -797,6 +887,58 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   <span>Gün Təsdiqlənib</span>
                 </div>
               )}
+            </div>
+          </div>
+
+          {/* 6-Metric Separation Breakdown for Selected Day */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
+                Ümumi Satış
+              </span>
+              <span className="text-base font-black font-mono text-zinc-900 dark:text-white mt-1 block">
+                {formatAZN(selectedDayMetrics.grossSalesTotal)}
+              </span>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
+                Nağd Satış
+              </span>
+              <span className="text-base font-black font-mono text-emerald-700 dark:text-emerald-400 mt-1 block">
+                {formatAZN(selectedDayMetrics.cashSales)}
+              </span>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 block">
+                Kart / POS Satış
+              </span>
+              <span className="text-base font-black font-mono text-blue-700 dark:text-blue-400 mt-1 block">
+                {formatAZN(selectedDayMetrics.cardSales + selectedDayMetrics.posSales)}
+              </span>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 shadow-sm">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400 block">
+                Borcla Satış
+              </span>
+              <span className="text-base font-black font-mono text-rose-700 dark:text-rose-400 mt-1 block">
+                {formatAZN(selectedDayMetrics.creditSales)}
+              </span>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 shadow-sm">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 block">
+                Faktiki Kassaya Girən
+              </span>
+              <span className="text-base font-black font-mono text-emerald-800 dark:text-emerald-300 mt-1 block">
+                {formatAZN(selectedDayMetrics.actualDrawerInflow)}
+              </span>
+            </div>
+            <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400 block">
+                Ödənilməmiş Borclar
+              </span>
+              <span className="text-base font-black font-mono text-red-600 dark:text-red-400 mt-1 block">
+                {formatAZN(selectedDayMetrics.totalUnpaidDebts)}
+              </span>
             </div>
           </div>
 
