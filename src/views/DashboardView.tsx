@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   TrendingUp,
   DollarSign,
@@ -11,7 +11,6 @@ import {
   Download,
   Calendar,
   ArrowRight,
-  BellRing,
   PackageCheck,
   Layers,
   Droplets,
@@ -20,7 +19,20 @@ import {
   ChevronDown,
   ChevronUp,
   PieChart,
+  ShoppingBag,
+  Wallet,
+  Clock,
+  Filter,
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from 'recharts';
 import { useApp } from '../context/AppContext';
 import { formatAZN, formatDateAZ, getTodayISODate, getCurrentMonthKey } from '../utils/dateUtils';
 import { calculateAllProductStocks, getLowStockProducts } from '../utils/stockCalculations';
@@ -33,7 +45,9 @@ import {
   calculateCategoryBreakdown,
 } from '../utils/financialCalculations';
 import { exportSalesToCSV } from '../utils/exportUtils';
-import { PWAInstallButton } from '../components/PWAInstallButton';
+
+export type DashboardPeriod = 'today' | 'week' | 'month' | 'custom';
+export type DashboardSubTab = 'summary' | 'products' | 'finance' | 'stock';
 
 export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({ onNavigate }) => {
   const {
@@ -41,15 +55,35 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
     purchases,
     sales,
     debts,
+    customerAccounts,
     dailyReports,
     expenses,
     settings,
-    notificationPermission,
-    requestPushPermission,
+    theme,
   } = useApp();
 
-  const [productPeriod, setProductPeriod] = useState<'today' | 'month'>('today');
-  const [categoryPeriod, setCategoryPeriod] = useState<'today' | 'month' | 'all'>('today');
+  const isDark = theme === 'dark';
+  const primaryColor = settings.primaryColor || '#dc2626';
+
+  // Period State: Günlük, Həftəlik, Aylıq, Xüsusi aralıq
+  const [period, setPeriod] = useState<DashboardPeriod>('today');
+  const todayISO = getTodayISODate();
+  const currentMonth = getCurrentMonthKey();
+
+  const [customStart, setCustomStart] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  });
+  const [customEnd, setCustomEnd] = useState<string>(todayISO);
+
+  // Sub-tab State: İcmal, Məhsullar, Maliyyə, Depo
+  const [activeSubTab, setActiveSubTab] = useState<DashboardSubTab>('summary');
+
+  // Expanded categories state in Products tab
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
     'Su': true,
     'Protein': true,
@@ -64,485 +98,1045 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
     }));
   };
 
-  const todayISO = getTodayISODate();
-  const currentMonth = getCurrentMonthKey();
+  // Date Range calculation
+  const dateRange = useMemo(() => {
+    if (period === 'today') {
+      return { startDate: todayISO, endDate: todayISO, label: 'Bu gün' };
+    }
+    if (period === 'week') {
+      const d = new Date();
+      d.setDate(d.getDate() - 6);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return { startDate: `${y}-${m}-${day}`, endDate: todayISO, label: 'Son 7 gün (Həftəlik)' };
+    }
+    if (period === 'month') {
+      return { startDate: `${currentMonth}-01`, endDate: todayISO, label: 'Bu ay' };
+    }
+    return {
+      startDate: customStart || todayISO,
+      endDate: customEnd || todayISO,
+      label: `${formatDateAZ(customStart)} – ${formatDateAZ(customEnd)}`,
+    };
+  }, [period, todayISO, currentMonth, customStart, customEnd]);
 
-  // Stock calculations
-  const allStocks = calculateAllProductStocks(products, purchases, sales, settings.minStockThreshold);
-  const lowStockItems = getLowStockProducts(products, purchases, sales, settings.minStockThreshold);
+  // Filtered dataset for selected period
+  const confirmedSales = useMemo(() => sales.filter(s => s.isConfirmed), [sales]);
 
-  // Sales filters
-  const confirmedSales = sales.filter(s => s.isConfirmed);
-  const todaySales = confirmedSales.filter(s => s.date === todayISO);
-  const monthSales = confirmedSales.filter(s => s.date.startsWith(currentMonth));
+  const periodSales = useMemo(() => {
+    return confirmedSales.filter(
+      s => s.date >= dateRange.startDate && s.date <= dateRange.endDate
+    );
+  }, [confirmedSales, dateRange]);
 
-  // Revenues
-  const todayRevenue = todaySales.reduce((sum, s) => sum + s.totalAmount, 0);
-  const monthRevenue = monthSales.reduce((sum, s) => sum + s.totalAmount, 0);
-  const totalRevenue = confirmedSales.reduce((sum, s) => sum + s.totalAmount, 0);
+  const periodPurchases = useMemo(() => {
+    return purchases.filter(
+      p => p.date >= dateRange.startDate && p.date <= dateRange.endDate
+    );
+  }, [purchases, dateRange]);
 
-  // Purchases and Expenses
-  const totalGoodsPurchases = purchases.reduce((sum, p) => sum + p.paidAmount, 0);
-  const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const periodExpenses = useMemo(() => {
+    return expenses.filter(
+      e => e.date >= dateRange.startDate && e.date <= dateRange.endDate
+    );
+  }, [expenses, dateRange]);
 
-  // Net Profit: Gəlir - Mal alışı - Xərclər
-  const profitData = calculateNetProfit(totalRevenue, totalGoodsPurchases, totalExpenses);
+  // Collected debt payments in selected period (used for cash-flow insight, separate from product sales revenue)
+  const periodDebtPayments = useMemo(() => {
+    return debts
+      .flatMap(d => d.payments || [])
+      .filter(p => {
+        const dStr = (p.paidAt || p.date || '').split('T')[0];
+        return dStr >= dateRange.startDate && dStr <= dateRange.endDate;
+      });
+  }, [debts, dateRange]);
 
-  // Payment Breakdown
-  const paymentBreakdown = calculatePaymentBreakdown(confirmedSales);
-  const totalPaid = (paymentBreakdown.cash + paymentBreakdown.card + paymentBreakdown.pos) || 0;
-  const cashPct = totalPaid > 0 ? Math.round((paymentBreakdown.cash / totalPaid) * 100) : 0;
-  const cardPct = totalPaid > 0 ? Math.round((paymentBreakdown.card / totalPaid) * 100) : 0;
-  const posPct = totalPaid > 0 ? Math.round((paymentBreakdown.pos / totalPaid) * 100) : 0;
+  const periodDebtCollected = useMemo(
+    () => periodDebtPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0),
+    [periodDebtPayments]
+  );
 
-  // Top products sold
-  const targetSales = productPeriod === 'today' ? todaySales : monthSales;
-  const productSaleStats = calculateProductSaleCounts(targetSales);
+  // Period Financials
+  const periodRevenue = useMemo(
+    () => periodSales.reduce((sum, s) => sum + s.totalAmount, 0),
+    [periodSales]
+  );
+  const periodPurchasesAmount = useMemo(
+    () => periodPurchases.reduce((sum, p) => sum + p.paidAmount, 0),
+    [periodPurchases]
+  );
+  const periodExpensesAmount = useMemo(
+    () => periodExpenses.reduce((sum, e) => sum + e.amount, 0),
+    [periodExpenses]
+  );
+  const periodProfit = useMemo(
+    () => calculateNetProfit(periodRevenue, periodPurchasesAmount, periodExpensesAmount),
+    [periodRevenue, periodPurchasesAmount, periodExpensesAmount]
+  );
 
-  // Category & Product level breakdown
-  const selectedCategorySales =
-    categoryPeriod === 'today'
-      ? todaySales
-      : categoryPeriod === 'month'
-      ? monthSales
-      : confirmedSales;
-  const categoryBreakdown = calculateCategoryBreakdown(selectedCategorySales, products);
+  // Period Payments (Sales + Debt Collections for Cash Drawer Accuracy)
+  const periodPayments = useMemo(
+    () => calculatePaymentBreakdown(periodSales),
+    [periodSales]
+  );
+  const debtPaymentsBreakdown = useMemo(() => {
+    let cash = 0;
+    let card = 0;
+    let pos = 0;
+    for (const p of periodDebtPayments) {
+      const amt = Number(p.amount) || 0;
+      const m = (p.paymentMethod || 'naqd').toLowerCase();
+      if (m === 'kart') card += amt;
+      else if (m === 'pos' || m === 'kocurme') pos += amt;
+      else cash += amt;
+    }
+    return { cash, card, pos };
+  }, [periodDebtPayments]);
 
-  // Debt overview
-  const debtOverview = calculateDebtOverview(debts);
+  const combinedCash = periodPayments.cash + debtPaymentsBreakdown.cash;
+  const combinedCard = periodPayments.card + debtPaymentsBreakdown.card;
+  const combinedPos = periodPayments.pos + debtPaymentsBreakdown.pos;
+  const totalPaid = combinedCash + combinedCard + combinedPos + periodPayments.balance;
 
-  // Discrepancy check for today
+  const cashPct = totalPaid > 0 ? Math.round((combinedCash / totalPaid) * 100) : 0;
+  const cardPct = totalPaid > 0 ? Math.round((combinedCard / totalPaid) * 100) : 0;
+  const posPct = totalPaid > 0 ? Math.round((combinedPos / totalPaid) * 100) : 0;
+  const balancePct = totalPaid > 0 ? Math.round((periodPayments.balance / totalPaid) * 100) : 0;
+
+  // Period Category & Product level breakdown
+  const categorySummary = useMemo(
+    () => calculateCategoryBreakdown(periodSales, products),
+    [periodSales, products]
+  );
+
+  // Period Top Product Stats
+  const productSaleStats = useMemo(
+    () => calculateProductSaleCounts(periodSales),
+    [periodSales]
+  );
+
+  // Stock calculations (All-time inventory balances)
+  const allStocks = useMemo(
+    () => calculateAllProductStocks(products, purchases, sales, settings.minStockThreshold),
+    [products, purchases, sales, settings.minStockThreshold]
+  );
+  const allStocksList = useMemo(() => Object.values(allStocks), [allStocks]);
+  const lowStockItems = useMemo(
+    () => getLowStockProducts(products, purchases, sales, settings.minStockThreshold),
+    [products, purchases, sales, settings.minStockThreshold]
+  );
+
+  // Debt & Customer Balances overview
+  const debtOverview = useMemo(() => calculateDebtOverview(debts), [debts]);
+  const totalCustomerBalance = useMemo(
+    () => customerAccounts.reduce((sum, c) => sum + c.balance, 0),
+    [customerAccounts]
+  );
+  const totalDepositedAllTime = useMemo(
+    () => customerAccounts.reduce((sum, c) => sum + c.totalDeposited, 0),
+    [customerAccounts]
+  );
+
+  // Today's debt payments for drawer discrepancy verification
+  const todayDebtPayments = useMemo(
+    () =>
+      debts
+        .flatMap(d => d.payments || [])
+        .filter(p => (p.paidAt || p.date || '').split('T')[0] === todayISO),
+    [debts, todayISO]
+  );
+  const todayDebtTotal = useMemo(
+    () => todayDebtPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0),
+    [todayDebtPayments]
+  );
+
+  // Discrepancy check for current day (includes today's collected debt payments)
   const todayReport = dailyReports.find(r => r.date === todayISO);
-  const discrepancy = checkDailyReportDiscrepancy(todayReport, sales.filter(s => s.date === todayISO));
+  const discrepancy = checkDailyReportDiscrepancy(
+    todayReport,
+    sales.filter(s => s.date === todayISO),
+    todayDebtPayments
+  );
 
-  // Last 7 days trend
-  const last7Days: { dateStr: string; label: string; amount: number }[] = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    const dateStr = `${y}-${m}-${day}`;
-    const dayTotal = confirmedSales
-      .filter(s => s.date === dateStr)
-      .reduce((sum, s) => sum + s.totalAmount, 0);
-    last7Days.push({
-      dateStr,
-      label: `${day}.${m}`,
-      amount: dayTotal,
-    });
-  }
-  const maxDayAmount = Math.max(...last7Days.map(d => d.amount), 10);
+  // Sales timeline chart data for the AreaChart
+  const timelineChartData = useMemo(() => {
+    if (period === 'today') {
+      const hoursMap: Record<string, { amount: number; count: number; hourLabel: string }> = {};
+      const standardHours = ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00', '22:00'];
+      for (const h of standardHours) {
+        hoursMap[h] = { amount: 0, count: 0, hourLabel: h };
+      }
+
+      for (const s of periodSales) {
+        const h = s.time ? parseInt(s.time.split(':')[0], 10) : 12;
+        const roundedHour = Math.min(Math.max(Math.floor(h / 2) * 2, 8), 22);
+        const slotKey = `${String(roundedHour).padStart(2, '0')}:00`;
+        if (!hoursMap[slotKey]) {
+          hoursMap[slotKey] = { amount: 0, count: 0, hourLabel: slotKey };
+        }
+        hoursMap[slotKey].amount = Math.round((hoursMap[slotKey].amount + (s.totalAmount || 0)) * 100) / 100;
+        hoursMap[slotKey].count += 1;
+      }
+
+      return Object.values(hoursMap).map(item => ({
+        label: item.hourLabel,
+        fullDate: `${formatDateAZ(todayISO)} saat ${item.hourLabel}`,
+        amount: item.amount,
+        salesCount: item.count,
+      }));
+    }
+
+    if (period === 'week') {
+      const points = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        const dateStr = `${y}-${m}-${day}`;
+        const daySales = confirmedSales.filter(s => s.date === dateStr);
+        const dayTotal = daySales.reduce((sum, s) => sum + s.totalAmount, 0);
+        points.push({
+          label: `${day}.${m}`,
+          fullDate: formatDateAZ(dateStr),
+          amount: Math.round(dayTotal * 100) / 100,
+          salesCount: daySales.length,
+        });
+      }
+      return points;
+    }
+
+    if (period === 'month') {
+      const points = [];
+      const now = new Date();
+      const currentDay = now.getDate();
+      const currentMonthStr = getCurrentMonthKey();
+      for (let dayNum = 1; dayNum <= currentDay; dayNum++) {
+        const dayStr = String(dayNum).padStart(2, '0');
+        const dateStr = `${currentMonthStr}-${dayStr}`;
+        const daySales = confirmedSales.filter(s => s.date === dateStr);
+        const dayTotal = daySales.reduce((sum, s) => sum + s.totalAmount, 0);
+        points.push({
+          label: `${dayStr}.${currentMonthStr.split('-')[1]}`,
+          fullDate: formatDateAZ(dateStr),
+          amount: Math.round(dayTotal * 100) / 100,
+          salesCount: daySales.length,
+        });
+      }
+      return points;
+    }
+
+    // Custom date range
+    const points = [];
+    const start = new Date(dateRange.startDate);
+    const end = new Date(dateRange.endDate);
+    const diffDays = Math.min(Math.max(Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)), 1), 60);
+
+    for (let i = 0; i <= diffDays; i++) {
+      const d = new Date(start);
+      d.setDate(d.getDate() + i);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const dateStr = `${y}-${m}-${day}`;
+      if (dateStr > dateRange.endDate) break;
+
+      const daySales = confirmedSales.filter(s => s.date === dateStr);
+      const dayTotal = daySales.reduce((sum, s) => sum + s.totalAmount, 0);
+      points.push({
+        label: `${day}.${m}`,
+        fullDate: formatDateAZ(dateStr),
+        amount: Math.round(dayTotal * 100) / 100,
+        salesCount: daySales.length,
+      });
+    }
+    return points;
+  }, [period, periodSales, confirmedSales, dateRange, todayISO]);
+
+  // Natural language summary string
+  const categoryNarrative = useMemo(() => {
+    if (categorySummary.categories.length === 0) {
+      return 'Bu dövrdə hələ ki heç bir təsdiqlənmiş satış qeydə alınmayıb.';
+    }
+    const parts = categorySummary.categories.map(
+      cat => `${cat.categoryName}: ${formatAZN(cat.revenue)} (${cat.percentageOfTotal}%)`
+    );
+    return `Seçilən dövrün xülasəsi: Ümumi dövriyyə ${formatAZN(categorySummary.totalRevenue)} (${categorySummary.totalQuantity} ədəd məhsul). Bölgü: ${parts.join(' · ')}.`;
+  }, [categorySummary]);
+
+  // Color generator for categories
+  const getCategoryTheme = (name: string) => {
+    const norm = name.toLowerCase();
+    if (norm.includes('su')) {
+      return {
+        badgeBg: 'bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800',
+        barBg: 'bg-cyan-500',
+        text: 'text-cyan-600 dark:text-cyan-400',
+        icon: <Droplets className="w-4 h-4 text-cyan-500 dark:text-cyan-400" />,
+      };
+    }
+    if (norm.includes('protein')) {
+      return {
+        badgeBg: 'bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
+        barBg: 'bg-red-500',
+        text: 'text-red-600 dark:text-red-400',
+        icon: <Dumbbell className="w-4 h-4 text-red-500 dark:text-red-400" />,
+      };
+    }
+    if (norm.includes('əlavə') || norm.includes('elave')) {
+      return {
+        badgeBg: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+        barBg: 'bg-amber-500',
+        text: 'text-amber-600 dark:text-amber-400',
+        icon: <Sparkles className="w-4 h-4 text-amber-500 dark:text-amber-400" />,
+      };
+    }
+    return {
+      badgeBg: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700',
+      barBg: 'bg-zinc-500 dark:bg-zinc-400',
+      text: 'text-zinc-700 dark:text-zinc-300',
+      icon: <Layers className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />,
+    };
+  };
 
   return (
-    <div className="space-y-6 pb-12 max-w-7xl mx-auto">
-      {/* Top Banner & Quick Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-zinc-800">
+    <div className="space-y-6 pb-14 max-w-7xl mx-auto">
+      {/* ─────────────────────────────────────────────────────────
+          TOP BAR & PERIOD SELECTOR (Günlük, Həftəlik, Aylıq, Xüsusi)
+         ───────────────────────────────────────────────────────── */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
         <div>
-          <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
-            <span>Xülasə & Dashboard</span>
-            <span className="text-xs bg-red-600 text-white font-bold px-2.5 py-0.5 rounded-full shadow-sm shadow-red-600/30">
-              Canlı
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight">
+              Xülasə & Hesabat Mərkəzi
+            </h2>
+            <span className="text-[11px] font-bold px-2 py-0.5 rounded-md bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800/80">
+              Admin
             </span>
-          </h2>
-          <p className="text-xs sm:text-sm text-zinc-400">
-            Tarix: <span className="font-semibold text-zinc-200">{formatDateAZ(todayISO)}</span> · Valyuta: AZN
+          </div>
+          <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-0.5">
+            Dövr: <span className="font-semibold text-zinc-800 dark:text-zinc-200">{dateRange.label}</span> · Valyuta: AZN
           </p>
         </div>
 
+        {/* Period Selection Controls */}
         <div className="flex flex-wrap items-center gap-2">
-          <PWAInstallButton variant="compact" />
-
-          {notificationPermission !== 'granted' && (
+          {/* Segmented Period Tabs */}
+          <div className="flex items-center p-1 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl">
             <button
-              onClick={() => requestPushPermission()}
-              className="px-3 py-1.5 text-xs font-semibold bg-zinc-900 border border-red-900/80 hover:bg-zinc-800 text-red-400 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
-              title="Qalıq minimum həddə çatanda bildiriş al"
+              type="button"
+              onClick={() => setPeriod('today')}
+              style={period === 'today' ? { backgroundColor: primaryColor } : undefined}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                period === 'today'
+                  ? 'text-white shadow-sm'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+              }`}
             >
-              <BellRing className="w-3.5 h-3.5 text-red-500" />
-              <span>Bildirişləri Aktivləşdir</span>
+              Günlük
             </button>
-          )}
+            <button
+              type="button"
+              onClick={() => setPeriod('week')}
+              style={period === 'week' ? { backgroundColor: primaryColor } : undefined}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                period === 'week'
+                  ? 'text-white shadow-sm'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+              }`}
+            >
+              Həftəlik
+            </button>
+            <button
+              type="button"
+              onClick={() => setPeriod('month')}
+              style={period === 'month' ? { backgroundColor: primaryColor } : undefined}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                period === 'month'
+                  ? 'text-white shadow-sm'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+              }`}
+            >
+              Aylıq
+            </button>
+            <button
+              type="button"
+              onClick={() => setPeriod('custom')}
+              style={period === 'custom' ? { backgroundColor: primaryColor } : undefined}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1 ${
+                period === 'custom'
+                  ? 'text-white shadow-sm'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Xüsusi aralıq</span>
+            </button>
+          </div>
 
+          {/* Quick Actions */}
           <button
-            onClick={() => exportSalesToCSV(sales)}
-            className="px-3 py-1.5 text-xs font-semibold bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-300 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
+            type="button"
+            onClick={() => exportSalesToCSV(periodSales)}
+            className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
+            title="Dövrün satışlarını CSV formatında endir"
           >
             <Download className="w-3.5 h-3.5" />
-            <span>Satışları Export Et</span>
+            <span className="hidden sm:inline">Export CSV</span>
           </button>
           <button
+            type="button"
             onClick={() => onNavigate('pos')}
-            className="px-4 py-1.5 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl transition-all shadow-md shadow-red-600/30 flex items-center gap-1.5"
+            style={{ backgroundColor: primaryColor }}
+            className="px-3.5 py-1.5 text-xs font-bold text-white rounded-xl transition-all shadow-md hover:opacity-90 flex items-center gap-1.5"
           >
-            <span>Kassaya Keç (POS)</span>
+            <span>Kassa (POS)</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Mobile PWA Install Quick Banner */}
-      <div className="lg:hidden">
-        <PWAInstallButton variant="banner" />
-      </div>
-
-      {/* Low Stock Warning Alert if any */}
-      {lowStockItems.length > 0 && (
-        <div className="p-4 rounded-2xl bg-red-950/40 border border-red-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-in fade-in">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-red-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-red-600/40">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-red-200">
-                Depoda {lowStockItems.length} məhsulun qalığı kritik həddədir ({settings.minStockThreshold} və ya az)!
-              </h4>
-              <p className="text-xs text-red-300/80">
-                {lowStockItems.map(i => `${i.product.name} (${i.activeStock} ədəd qalıb)`).join(' · ')}
-              </p>
-            </div>
+      {/* Custom Date Range Picker when 'custom' is active */}
+      {period === 'custom' && (
+        <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900/90 border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-wrap items-center gap-4 animate-in fade-in">
+          <div className="flex items-center gap-2 text-xs font-bold text-zinc-700 dark:text-zinc-300">
+            <Filter className="w-4 h-4 text-red-500" />
+            <span>Xüsusi Tarix Aralığı:</span>
           </div>
-          <button
-            onClick={() => onNavigate('purchases')}
-            className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl transition-colors shrink-0 shadow-sm"
-          >
-            Mal Qəbulu Et
-          </button>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-zinc-500 dark:text-zinc-400">Başlanğıc:</span>
+            <input
+              type="date"
+              value={customStart}
+              onChange={e => setCustomStart(e.target.value)}
+              className="px-3 py-1.5 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white text-xs font-mono focus:outline-none focus:border-red-500"
+            />
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-zinc-500 dark:text-zinc-400">Son:</span>
+            <input
+              type="date"
+              value={customEnd}
+              onChange={e => setCustomEnd(e.target.value)}
+              className="px-3 py-1.5 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-white text-xs font-mono focus:outline-none focus:border-red-500"
+            />
+          </div>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+            {periodSales.length} satış tapıldı
+          </span>
         </div>
       )}
 
-      {/* Discrepancy Verification Status Card */}
-      <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
-        discrepancy.isMatching
-          ? 'bg-zinc-900 border-emerald-900/60 text-emerald-300'
-          : 'bg-zinc-900 border-red-900 text-red-300'
-      }`}>
-        <div className="flex items-start sm:items-center gap-3">
-          {discrepancy.isMatching ? (
-            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5 sm:mt-0" />
-          ) : (
-            <AlertTriangle className="w-5 h-5 text-red-400 shrink-0 mt-0.5 sm:mt-0" />
-          )}
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-zinc-300">Gündəlik Kassa Yoxlaması:</span>
-              <span className={`text-xs font-bold px-2 py-0.5 rounded-full inline-block ${
-                discrepancy.isMatching
-                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                  : 'bg-red-950 text-red-300 border border-red-800'
-              }`}>
-                {discrepancy.message}
-              </span>
-            </div>
-            <p className="text-xs text-zinc-400 mt-1">
-              Təsdiqlənmiş Satışlar: <span className="font-mono font-bold text-white">{formatAZN(discrepancy.salesTotal)}</span> · Gündəlik Hesabat Kassa: <span className="font-mono font-bold text-white">{formatAZN(discrepancy.dailyReportTotal)}</span>
-            </p>
-          </div>
-        </div>
+      {/* ─────────────────────────────────────────────────────────
+          4 ALT-TAB NAVİQASİYASI (İcmal, Məhsullar, Maliyyə, Depo)
+         ───────────────────────────────────────────────────────── */}
+      <div className="flex items-center p-1.5 bg-zinc-100 dark:bg-zinc-900/90 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-x-auto gap-1">
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('summary')}
+          className={`flex-1 min-w-[120px] py-2 px-3 text-xs sm:text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
+            activeSubTab === 'summary'
+              ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-700'
+              : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-zinc-800/40'
+          }`}
+        >
+          <PieChart className="w-4 h-4 text-red-500" />
+          <span>İcmal (Ümumi)</span>
+        </button>
 
         <button
-          onClick={() => onNavigate('daily-report')}
-          className="text-xs font-semibold underline hover:no-underline text-red-400 shrink-0 self-end sm:self-center"
+          type="button"
+          onClick={() => setActiveSubTab('products')}
+          className={`flex-1 min-w-[140px] py-2 px-3 text-xs sm:text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
+            activeSubTab === 'products'
+              ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-700'
+              : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-zinc-800/40'
+          }`}
         >
-          Hesabata bax
+          <Droplets className="w-4 h-4 text-cyan-500 dark:text-cyan-400" />
+          <span>Məhsul Satışları ({categorySummary.totalQuantity})</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('finance')}
+          className={`flex-1 min-w-[120px] py-2 px-3 text-xs sm:text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
+            activeSubTab === 'finance'
+              ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-700'
+              : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-zinc-800/40'
+          }`}
+        >
+          <DollarSign className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+          <span>Maliyyə & Balans</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('stock')}
+          className={`flex-1 min-w-[120px] py-2 px-3 text-xs sm:text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
+            activeSubTab === 'stock'
+              ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm border border-zinc-200 dark:border-zinc-700'
+              : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-white/60 dark:hover:bg-zinc-800/40'
+          }`}
+        >
+          <PackageCheck className="w-4 h-4 text-amber-500 dark:text-amber-400" />
+          <span>Depo & Qalıqlar</span>
+          {lowStockItems.length > 0 && (
+            <span className="px-1.5 py-0.5 text-[10px] font-mono font-bold rounded-md bg-red-600 text-white">
+              {lowStockItems.length}
+            </span>
+          )}
         </button>
       </div>
 
-      {/* 4 Main KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Today's Sales */}
-        <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
-              Bu Günün Satışı
-            </span>
-            <div className="w-8 h-8 rounded-lg bg-red-950 text-red-400 flex items-center justify-center border border-red-900/60">
-              <TrendingUp className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-white font-mono tracking-tight">
-              {formatAZN(todayRevenue)}
-            </div>
-            <p className="text-xs text-zinc-400 mt-1">
-              Bugün: <span className="font-bold text-red-400">{todaySales.length} satış</span>
-            </p>
-          </div>
-        </div>
-
-        {/* Month Sales */}
-        <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
-              Bu Ayın Satışı
-            </span>
-            <div className="w-8 h-8 rounded-lg bg-zinc-800 text-zinc-300 flex items-center justify-center">
-              <Calendar className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-white font-mono tracking-tight">
-              {formatAZN(monthRevenue)}
-            </div>
-            <p className="text-xs text-zinc-400 mt-1">
-              Ümumi satış: <span className="font-bold text-zinc-200">{formatAZN(totalRevenue)}</span>
-            </p>
-          </div>
-        </div>
-
-        {/* Net Profit */}
-        <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
-              Xalis Mənfəət
-            </span>
-            <div className="w-8 h-8 rounded-lg bg-red-950 text-red-400 flex items-center justify-center border border-red-900/60">
-              <DollarSign className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className={`text-2xl font-black font-mono tracking-tight ${
-              profitData.netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'
-            }`}>
-              {formatAZN(profitData.netProfit)}
-            </div>
-            <p className="text-[11px] text-zinc-400 mt-1 truncate">
-              Mal alışı: {formatAZN(totalGoodsPurchases)} · Xərc: {formatAZN(totalExpenses)}
-            </p>
-          </div>
-        </div>
-
-        {/* Debt Overview */}
-        <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
-              Qalıq Borc
-            </span>
-            <div className="w-8 h-8 rounded-lg bg-red-950 text-red-400 flex items-center justify-center border border-red-900/60">
-              <Users className="w-4 h-4" />
-            </div>
-          </div>
-          <div className="mt-3">
-            <div className="text-2xl font-black text-red-500 font-mono tracking-tight">
-              {formatAZN(debtOverview.totalRemainingDebt)}
-            </div>
-            <p className="text-xs text-zinc-400 mt-1">
-              Borclu sayı: <span className="font-bold text-red-400">{debtOverview.unpaidDebtorsCount} nəfər</span>
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* ======================================================== */}
-      {/* KATEQORİYALAR VƏ MƏHSULLAR ÜZRƏ DETALLI SATIŞ HESABATI */}
-      {/* ======================================================== */}
-      <div className="p-5 sm:p-6 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-xl space-y-6">
-        {/* Header with period toggle */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800/80">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-red-600/20 text-red-500 border border-red-500/30 flex items-center justify-center">
-                <Layers className="w-4 h-4" />
+      {/* ─────────────────────────────────────────────────────────
+          TAB 1: İCMAL (Minimal KPI kartları, Ödənişlər, Kateqoriya Zolağı)
+         ───────────────────────────────────────────────────────── */}
+      {activeSubTab === 'summary' && (
+        <div className="space-y-6">
+          {/* Minimal KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Period Sales Revenue */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/90 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                  Dövrün Dövriyyəsi
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-red-50 dark:bg-red-950/80 text-red-600 dark:text-red-400 flex items-center justify-center border border-red-200 dark:border-red-900/60">
+                  <TrendingUp className="w-4 h-4" />
+                </div>
               </div>
-              <h3 className="text-base sm:text-lg font-black text-white tracking-tight">
-                Kateqoriyalar və Məhsullar Üzrə Satış Bölgüsü
-              </h3>
+              <div className="mt-3">
+                <div className="text-2xl font-black text-zinc-900 dark:text-white font-mono tracking-tight">
+                  {formatAZN(periodRevenue)}
+                </div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1 flex items-center gap-1.5">
+                  <span>{periodSales.length} əməliyyat</span>
+                  <span aria-hidden="true">·</span>
+                  <span className="text-zinc-700 dark:text-zinc-300 font-semibold">{categorySummary.totalQuantity} ədəd məhsul</span>
+                </p>
+              </div>
             </div>
-            <p className="text-xs text-zinc-400 mt-1">
-              Satılan ümumi məbləğin su, protein və digər kateqoriyalara bölgüsü və hər məhsulun satışı
-            </p>
+
+            {/* Net Profit */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/90 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                  Xalis Mənfəət
+                </span>
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center border ${
+                  periodProfit.isProfit
+                    ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900/60'
+                    : 'bg-red-50 dark:bg-red-950/80 text-red-600 dark:text-red-400 border-red-200 dark:border-red-900/60'
+                }`}>
+                  <DollarSign className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-3">
+                <div className={`text-2xl font-black font-mono tracking-tight ${
+                  periodProfit.isProfit ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+                }`}>
+                  {formatAZN(periodProfit.netProfit)}
+                </div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Alış: {formatAZN(periodPurchasesAmount)} · Xərc: {formatAZN(periodExpensesAmount)}
+                </p>
+              </div>
+            </div>
+
+            {/* Total Remaining Debt */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/90 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                  Qalıq Nisyə (Borc)
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-950/80 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-200 dark:border-amber-900/60">
+                  <Users className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-3">
+                <div className="text-2xl font-black text-zinc-900 dark:text-white font-mono tracking-tight">
+                  {formatAZN(debtOverview.totalRemainingDebt)}
+                </div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Borclu: <span className="font-semibold text-amber-600 dark:text-amber-400">{debtOverview.debtorCount} nəfər</span>
+                  {periodDebtCollected > 0 && (
+                    <span className="text-emerald-600 dark:text-emerald-400 font-semibold"> · Yığılıb: {formatAZN(periodDebtCollected)}</span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Total Customer Deposit Balance */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800/90 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                  Müştəri Depozitləri
+                </span>
+                <div className="w-8 h-8 rounded-lg bg-cyan-50 dark:bg-cyan-950/80 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-200 dark:border-cyan-900/60">
+                  <Wallet className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-3">
+                <div className="text-2xl font-black text-cyan-600 dark:text-cyan-400 font-mono tracking-tight">
+                  {formatAZN(totalCustomerBalance)}
+                </div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Cəmi qəbul edilən: <span className="font-semibold text-zinc-700 dark:text-zinc-300">{formatAZN(totalDepositedAllTime)}</span>
+                </p>
+              </div>
+            </div>
           </div>
 
-          {/* Period selector */}
-          <div className="flex items-center p-1 bg-zinc-950 border border-zinc-800 rounded-xl self-start sm:self-center">
-            <button
-              type="button"
-              onClick={() => setCategoryPeriod('today')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                categoryPeriod === 'today'
-                  ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
-                  : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              Bu gün
-            </button>
-            <button
-              type="button"
-              onClick={() => setCategoryPeriod('month')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                categoryPeriod === 'month'
-                  ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
-                  : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              Bu ay
-            </button>
-            <button
-              type="button"
-              onClick={() => setCategoryPeriod('all')}
-              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
-                categoryPeriod === 'all'
-                  ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
-                  : 'text-zinc-400 hover:text-white'
-              }`}
-            >
-              Bütün dövr
-            </button>
-          </div>
-        </div>
-
-        {/* Dynamic summary text e.g. "Bu günün 21.80 AZN satışından 16.80 AZN (77.1%) Su kateqoriyasından..." */}
-        <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 flex items-start gap-2.5">
-          <Sparkles className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
-          <div className="leading-relaxed">
-            <strong className="text-white">
-              {categoryPeriod === 'today' ? 'Bugünkü Satışların Xülasəsi:' : categoryPeriod === 'month' ? 'Bu Aykı Satışların Xülasəsi:' : 'Bütün Dövrün Satış Xülasəsi:'}
-            </strong>{' '}
-            Ümumi dövriyyə <span className="font-mono font-bold text-red-400">{formatAZN(categoryBreakdown.totalRevenue)}</span> ({categoryBreakdown.totalQuantity} ədəd məhsul).
-            {categoryBreakdown.categories.length > 0 ? (
-              <span>
-                {' '}Bölgü: {categoryBreakdown.categories.map(c => `${c.categoryName}: ${formatAZN(c.totalRevenue)} (${c.percentageOfTotal}%)`).join(' · ')}.
+          {/* Dynamic Natural Language Summary & Color Multi-Segment Bar */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Droplets className="w-4 h-4 text-cyan-500 dark:text-cyan-400" />
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-white tracking-wide">
+                  Dövrün Kateqoriya Dövriyyəsi
+                </h3>
+              </div>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                Cəmi: {formatAZN(categorySummary.totalRevenue)}
               </span>
+            </div>
+
+            {/* Dynamic narrative */}
+            <p className="text-xs text-zinc-700 dark:text-zinc-300 leading-relaxed bg-zinc-50 dark:bg-zinc-950/60 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800/80">
+              {categoryNarrative}
+            </p>
+
+            {/* Visual multi-segment bar */}
+            {categorySummary.totalRevenue > 0 && (
+              <div className="space-y-2">
+                <div className="h-3 w-full bg-zinc-100 dark:bg-zinc-950 rounded-full overflow-hidden flex shadow-inner">
+                  {categorySummary.categories.map((cat, idx) => {
+                    const themeStyle = getCategoryTheme(cat.categoryName);
+                    return (
+                      <div
+                        key={idx}
+                        style={{ width: `${cat.percentageOfTotal}%` }}
+                        className={`${themeStyle.barBg} transition-all hover:opacity-90`}
+                        title={`${cat.categoryName}: ${formatAZN(cat.revenue)} (${cat.percentageOfTotal}%)`}
+                      />
+                    );
+                  })}
+                </div>
+
+                {/* Legend */}
+                <div className="flex flex-wrap items-center gap-4 pt-1 text-xs">
+                  {categorySummary.categories.map((cat, idx) => {
+                    const themeStyle = getCategoryTheme(cat.categoryName);
+                    return (
+                      <div key={idx} className="flex items-center gap-1.5">
+                        <span className={`w-2.5 h-2.5 rounded-full ${themeStyle.barBg}`} />
+                        <span className="text-zinc-600 dark:text-zinc-300 font-medium">{cat.categoryName}:</span>
+                        <span className="font-mono font-bold text-zinc-900 dark:text-white">{formatAZN(cat.revenue)}</span>
+                        <span className="text-zinc-500 dark:text-zinc-400">({cat.percentageOfTotal}%)</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ─────────────────────────────────────────────────────────
+              RECHARTS AREA CHART: SATIŞLARIN ZAMAN ÜZRƏ DİNAMİKASI
+             ───────────────────────────────────────────────────────── */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-zinc-200 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <TrendingUp className="w-4 h-4 text-red-500" />
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-white tracking-wide">
+                  Satışların Zaman Üzrə Dinamikası (Sahə Qrafiki)
+                </h3>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-zinc-500 dark:text-zinc-400">Dövr üzrə ümumi gəlir:</span>
+                <span className="font-mono font-black text-red-600 dark:text-red-400 text-sm">
+                  {formatAZN(periodRevenue)}
+                </span>
+              </div>
+            </div>
+
+            <div className="h-64 w-full pt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart
+                  data={timelineChartData}
+                  margin={{ top: 10, right: 10, left: -15, bottom: 0 }}
+                >
+                  <defs>
+                    <linearGradient id="salesAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={primaryColor} stopOpacity={0.42} />
+                      <stop offset="95%" stopColor={primaryColor} stopOpacity={0.0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke={isDark ? '#27272a' : '#e4e4e7'}
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="label"
+                    stroke={isDark ? '#71717a' : '#71717a'}
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                  />
+                  <YAxis
+                    stroke={isDark ? '#71717a' : '#71717a'}
+                    fontSize={11}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(val) => `${val} ₼`}
+                  />
+                  <Tooltip
+                    content={({ active, payload, label }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        return (
+                          <div className="bg-white dark:bg-zinc-950/95 border border-zinc-200 dark:border-zinc-800 p-3 rounded-xl shadow-xl text-xs space-y-1">
+                            <p className="font-bold text-zinc-800 dark:text-zinc-300">{data.fullDate || label}</p>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="w-2 h-2 rounded-full"
+                                style={{ backgroundColor: primaryColor }}
+                              />
+                              <span className="text-zinc-500 dark:text-zinc-400">Satış Gəliri:</span>
+                              <span className="font-mono text-sm font-black text-zinc-900 dark:text-white">
+                                {formatAZN(Number(payload[0].value))}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-zinc-500 font-medium">
+                              Əməliyyat sayı: <strong className="text-zinc-800 dark:text-zinc-300 font-mono">{data.salesCount}</strong>
+                            </p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="amount"
+                    name="Satış Məbləği"
+                    stroke={primaryColor}
+                    strokeWidth={2.5}
+                    fillOpacity={1}
+                    fill="url(#salesAreaGradient)"
+                    dot={{ r: 3, fill: primaryColor, strokeWidth: 1, stroke: '#ffffff' }}
+                    activeDot={{ r: 6, fill: primaryColor, strokeWidth: 2, stroke: '#ffffff' }}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Payment Methods & Daily Discrepancy Verification */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {/* Payment Methods Breakdown */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-red-500" />
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                    Ödəniş Növləri Bölgüsü (Satış + Borc Daxilolmaları)
+                  </h3>
+                </div>
+                <span className="text-xs font-mono text-zinc-500 dark:text-zinc-400">
+                  {formatAZN(totalPaid)}
+                </span>
+              </div>
+
+              <div className="space-y-3">
+                {/* Cash */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
+                      <Banknote className="w-3.5 h-3.5 text-emerald-500 dark:text-emerald-400" /> Nağd Kassa
+                    </span>
+                    <span className="font-mono font-bold text-zinc-900 dark:text-white">
+                      {formatAZN(combinedCash)} ({cashPct}%)
+                    </span>
+                  </div>
+                  <div className="h-1.5 bg-zinc-100 dark:bg-zinc-950 rounded-full overflow-hidden">
+                    <div className="h-full bg-emerald-500" style={{ width: `${cashPct}%` }} />
+                  </div>
+                </div>
+
+                {/* Card */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
+                      <CreditCard className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" /> Bank Kartı
+                    </span>
+                    <span className="font-mono font-bold text-zinc-900 dark:text-white">
+                      {formatAZN(combinedCard)} ({cardPct}%)
+                    </span>
+                  </div>
+                  <div className="h-1.5 bg-zinc-100 dark:bg-zinc-950 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-500" style={{ width: `${cardPct}%` }} />
+                  </div>
+                </div>
+
+                {/* POS */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
+                      <Smartphone className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400" /> POS Terminal
+                    </span>
+                    <span className="font-mono font-bold text-zinc-900 dark:text-white">
+                      {formatAZN(combinedPos)} ({posPct}%)
+                    </span>
+                  </div>
+                  <div className="h-1.5 bg-zinc-100 dark:bg-zinc-950 rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-500" style={{ width: `${posPct}%` }} />
+                  </div>
+                </div>
+
+                {/* Balance (Deposit) */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5">
+                      <Wallet className="w-3.5 h-3.5 text-cyan-500 dark:text-cyan-400" /> Müştəri Balansı
+                    </span>
+                    <span className="font-mono font-bold text-zinc-900 dark:text-white">
+                      {formatAZN(periodPayments.balance)} ({balancePct}%)
+                    </span>
+                  </div>
+                  <div className="h-1.5 bg-zinc-100 dark:bg-zinc-950 rounded-full overflow-hidden">
+                    <div className="h-full bg-cyan-500" style={{ width: `${balancePct}%` }} />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Daily Discrepancy & Shift Check */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-500 dark:text-emerald-400" />
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                    Gündəlik Kassa və Hesabat Fərqi
+                  </h3>
+                </div>
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                  discrepancy.isMatching
+                    ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
+                    : 'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800'
+                }`}>
+                  {discrepancy.isMatching ? 'Uyğundur' : 'Fərq Var'}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800/80 space-y-2 text-xs">
+                <div className="flex justify-between items-center">
+                  <span className="text-zinc-600 dark:text-zinc-400">
+                    Gözlənilən Kassa (Satış + {formatAZN(todayDebtTotal)} Borc Ödənişi):
+                  </span>
+                  <span className="font-mono font-bold text-zinc-900 dark:text-white">{formatAZN(discrepancy.salesTotal)}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-zinc-600 dark:text-zinc-400">İşçinin Gündəlik Hesabatı:</span>
+                  <span className="font-mono font-bold text-zinc-900 dark:text-white">{formatAZN(discrepancy.dailyReportTotal)}</span>
+                </div>
+                <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800 flex justify-between items-center font-bold">
+                  <span className="text-zinc-700 dark:text-zinc-300">Fərq:</span>
+                  <span className={`font-mono ${discrepancy.difference === 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                    {formatAZN(discrepancy.difference)}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => onNavigate('daily-report')}
+                className="w-full py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-semibold rounded-xl transition-colors border border-zinc-200 dark:border-zinc-700/80"
+              >
+                Gündəlik Hesabat Səhifəsinə Keç
+              </button>
+            </div>
+          </div>
+
+          {/* Recent Sales in Period */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                  Seçilən Dövrün Son Satışları ({periodSales.length})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate('pos')}
+                className="text-xs text-red-600 dark:text-red-400 hover:underline font-semibold"
+              >
+                Hamısını Gör
+              </button>
+            </div>
+
+            {periodSales.length === 0 ? (
+              <p className="text-xs text-zinc-500 py-4 text-center">
+                Bu dövr üçün heç bir satış qeydə alınmayıb.
+              </p>
             ) : (
-              <span> Seçilmiş dövr üçün satış qeydə alınmayıb.</span>
+              <div className="divide-y divide-zinc-200 dark:divide-zinc-800/80">
+                {periodSales.slice(0, 5).map(sale => (
+                  <div key={sale.id} className="py-2.5 flex items-center justify-between text-xs">
+                    <div>
+                      <div className="font-semibold text-zinc-900 dark:text-white">
+                        {sale.items.map(i => `${i.productName} (${i.quantity}x)`).join(', ')}
+                      </div>
+                      <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                        {formatDateAZ(sale.date)} {sale.time} · Ödəniş:{' '}
+                        <span className="capitalize text-zinc-700 dark:text-zinc-300">{sale.paymentType}</span>
+                        {sale.createdBy && (
+                          <span> · Məsul: <strong className="text-zinc-700 dark:text-zinc-300">@{sale.createdBy}</strong></span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="font-mono font-bold text-zinc-900 dark:text-white text-sm">
+                      {formatAZN(sale.totalAmount)}
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
+      )}
 
-        {/* Visual Multi-Segment Bar */}
-        {categoryBreakdown.totalRevenue > 0 && (
-          <div className="space-y-2">
-            <div className="flex justify-between items-center text-[11px] text-zinc-400">
-              <span className="font-medium">Kateqoriya Dövriyyə Payı</span>
-              <span className="font-mono text-zinc-300">{categoryBreakdown.categories.length} kateqoriya</span>
+      {/* ─────────────────────────────────────────────────────────
+          TAB 2: MƏHSUL SATIŞLARI (Məs: 1 L Su 10 ədəd 10 AZN, Kateqoriyalar)
+         ───────────────────────────────────────────────────────── */}
+      {activeSubTab === 'products' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Header Note */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-cyan-50 dark:bg-cyan-950 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-200 dark:border-cyan-900/60 shrink-0">
+                <ShoppingBag className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                  Məhsul və Kateqoriyalar Üzrə Satış Hesabatı
+                </h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  Seçilən dövrdə ({dateRange.label}) hər kateqoriya və məhsuldan neçə ədəd satıldığı və əldə olunan dövriyyə.
+                </p>
+              </div>
             </div>
-            <div className="w-full h-3 rounded-full bg-zinc-800 overflow-hidden flex shadow-inner">
-              {categoryBreakdown.categories.map((cat, idx) => {
-                const colors = [
-                  'bg-sky-500',
-                  'bg-red-600',
-                  'bg-amber-500',
-                  'bg-purple-600',
-                  'bg-emerald-500',
-                  'bg-pink-500',
-                ];
-                const colorClass = colors[idx % colors.length];
+
+            <div className="text-right shrink-0">
+              <span className="text-[11px] text-zinc-500 dark:text-zinc-400 block">Dövrün Satış Cəmi</span>
+              <span className="text-lg font-black text-zinc-900 dark:text-white font-mono">
+                {formatAZN(categorySummary.totalRevenue)}
+              </span>
+            </div>
+          </div>
+
+          {/* If no sales in period */}
+          {categorySummary.categories.length === 0 ? (
+            <div className="p-8 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-center space-y-2">
+              <p className="text-sm font-bold text-zinc-700 dark:text-zinc-300">
+                Seçilən dövr üçün ({dateRange.label}) heç bir məhsul satışı qeydə alınmayıb.
+              </p>
+              <p className="text-xs text-zinc-500">
+                Dövrü dəyişərək "Bu ay" və ya "Həftəlik" seçə bilərsiniz.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-5">
+              {categorySummary.categories.map((cat, idx) => {
+                const themeStyle = getCategoryTheme(cat.categoryName);
+                const isExpanded = expandedCategories[cat.categoryName] ?? true;
+
                 return (
                   <div
-                    key={cat.categoryName}
-                    className={`${colorClass} h-full transition-all duration-500 relative group`}
-                    style={{ width: `${cat.percentageOfTotal}%` }}
-                    title={`${cat.categoryName}: ${formatAZN(cat.totalRevenue)} (${cat.percentageOfTotal}%)`}
-                  />
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Categories Cards & Detailed Products Breakdown */}
-        {categoryBreakdown.categories.length === 0 ? (
-          <div className="py-8 text-center text-xs text-zinc-500">
-            Bu dövr üçün hələ heç bir satış qeydə alınmayıb. Kassa bölməsindən yeni satışlar daxil edildikcə burada kateqoriya və məhsul üzrə canlı hesabat görünəcək.
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 gap-4">
-            {categoryBreakdown.categories.map((cat, idx) => {
-              const colors = [
-                { border: 'border-sky-900/60', badge: 'bg-sky-950 text-sky-400 border-sky-800', bar: 'bg-sky-500', text: 'text-sky-400', icon: Droplets },
-                { border: 'border-red-900/60', badge: 'bg-red-950 text-red-400 border-red-800', bar: 'bg-red-600', text: 'text-red-400', icon: Dumbbell },
-                { border: 'border-amber-900/60', badge: 'bg-amber-950 text-amber-400 border-amber-800', bar: 'bg-amber-500', text: 'text-amber-400', icon: Sparkles },
-                { border: 'border-purple-900/60', badge: 'bg-purple-950 text-purple-400 border-purple-800', bar: 'bg-purple-500', text: 'text-purple-400', icon: Layers },
-                { border: 'border-emerald-900/60', badge: 'bg-emerald-950 text-emerald-400 border-emerald-800', bar: 'bg-emerald-500', text: 'text-emerald-400', icon: CheckCircle2 },
-              ];
-              const theme = colors[idx % colors.length];
-              const IconComp = theme.icon;
-              const isExpanded = expandedCategories[cat.categoryName] ?? true;
-
-              return (
-                <div
-                  key={cat.categoryName}
-                  className={`rounded-xl bg-zinc-950/70 border ${theme.border} overflow-hidden transition-all`}
-                >
-                  {/* Category Header Row */}
-                  <div
-                    onClick={() => toggleCategoryExpand(cat.categoryName)}
-                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer hover:bg-zinc-800/40 select-none transition-colors"
+                    key={idx}
+                    className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${theme.badge}`}>
-                        <IconComp className="w-4 h-4" />
+                    {/* Category Header */}
+                    <div
+                      onClick={() => toggleCategoryExpand(cat.categoryName)}
+                      className="flex items-center justify-between cursor-pointer select-none pb-2 border-b border-zinc-200 dark:border-zinc-800"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center shrink-0">
+                          {themeStyle.icon}
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-base font-bold text-zinc-900 dark:text-white">
+                              {cat.categoryName} Bölməsi
+                            </h4>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${themeStyle.badgeBg}`}>
+                              {cat.percentageOfTotal}% Dövriyyə
+                            </span>
+                          </div>
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                            Cəmi: <span className="font-bold text-zinc-900 dark:text-white">{cat.quantity} ədəd</span> · Məhsul çeşidi: {cat.products.length}
+                          </p>
+                        </div>
                       </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-bold text-white tracking-tight">
-                            {cat.categoryName}
-                          </h4>
-                          <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${theme.badge}`}>
-                            {cat.percentageOfTotal}% Pay
+
+                      <div className="flex items-center gap-4">
+                        <div className="text-right">
+                          <span className="text-base font-black text-zinc-900 dark:text-white font-mono block">
+                            {formatAZN(cat.revenue)}
+                          </span>
+                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                            {cat.quantity} ədəd satılıb
                           </span>
                         </div>
-                        <p className="text-xs text-zinc-400 mt-0.5">
-                          Toplam satılan: <strong className="text-zinc-200">{cat.totalQuantity} ədəd</strong> · {cat.products.length} çeşid məhsul
-                        </p>
+                        <button type="button" className="text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white p-1">
+                          {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        </button>
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between sm:justify-end gap-4">
-                      <div className="text-right">
-                        <div className="text-base font-black font-mono text-white">
-                          {formatAZN(cat.totalRevenue)}
-                        </div>
-                        <div className="text-[10px] text-zinc-400">
-                          {cat.percentageOfTotal}% ümumi gəlir
-                        </div>
-                      </div>
-                      <div className="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-400">
-                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Expanded Product Details Table */}
-                  {isExpanded && (
-                    <div className="border-t border-zinc-800/80 bg-zinc-900/40 px-3 py-3 sm:px-4 sm:py-3.5">
+                    {/* Category Products Table */}
+                    {isExpanded && (
                       <div className="overflow-x-auto">
                         <table className="w-full text-left text-xs">
                           <thead>
-                            <tr className="text-[10px] uppercase font-bold text-zinc-500 border-b border-zinc-800/60">
-                              <th className="pb-2">Məhsulun Adı</th>
-                              <th className="pb-2 text-right">Tək Qiymət</th>
-                              <th className="pb-2 text-center">Satılan Say</th>
-                              <th className="pb-2 text-right">Toplam Satış</th>
-                              <th className="pb-2 text-right">Kateqoriyada Payı</th>
+                            <tr className="border-b border-zinc-200 dark:border-zinc-800/80 text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                              <th className="py-2 px-3">Məhsul Adı</th>
+                              <th className="py-2 px-3 text-right">Vahid Qiyməti</th>
+                              <th className="py-2 px-3 text-right">Satılan Say</th>
+                              <th className="py-2 px-3 text-right">Cəmi Gəlir</th>
+                              <th className="py-2 px-3 text-right">Bölmədəki Payı</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-zinc-800/50">
+                          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
                             {cat.products.map(prod => (
-                              <tr key={prod.productId} className="hover:bg-zinc-800/30 transition-colors">
-                                <td className="py-2.5 font-medium text-zinc-200 pr-2">
+                              <tr
+                                key={prod.productId}
+                                className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors"
+                              >
+                                <td className="py-2.5 px-3 font-semibold text-zinc-900 dark:text-white">
                                   {prod.productName}
                                 </td>
-                                <td className="py-2.5 text-right font-mono text-zinc-400 whitespace-nowrap">
+                                <td className="py-2.5 px-3 text-right font-mono text-zinc-600 dark:text-zinc-300">
                                   {formatAZN(prod.unitPrice)}
                                 </td>
-                                <td className="py-2.5 text-center font-mono font-bold text-white whitespace-nowrap">
-                                  <span className="px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-200">
-                                    {prod.quantity} ədəd
-                                  </span>
+                                <td className="py-2.5 px-3 text-right font-mono font-bold text-red-600 dark:text-red-400">
+                                  {prod.quantity} ədəd
                                 </td>
-                                <td className="py-2.5 text-right font-mono font-bold text-red-400 whitespace-nowrap">
+                                <td className="py-2.5 px-3 text-right font-mono font-black text-zinc-900 dark:text-white">
                                   {formatAZN(prod.revenue)}
                                 </td>
-                                <td className="py-2.5 text-right whitespace-nowrap pl-3">
-                                  <div className="flex items-center justify-end gap-2">
-                                    <span className="text-[11px] font-mono font-semibold text-zinc-300">
-                                      {prod.percentageOfCategory}%
-                                    </span>
-                                    <div className="w-12 bg-zinc-800 h-1.5 rounded-full overflow-hidden hidden sm:block">
+                                <td className="py-2.5 px-3 text-right font-mono text-zinc-500 dark:text-zinc-400">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <span>{prod.percentageOfCategory}%</span>
+                                    <div className="w-12 h-1 bg-zinc-200 dark:bg-zinc-950 rounded-full overflow-hidden inline-block">
                                       <div
-                                        className={`${theme.bar} h-full rounded-full`}
+                                        className={`h-full ${themeStyle.barBg}`}
                                         style={{ width: `${prod.percentageOfCategory}%` }}
                                       />
                                     </div>
@@ -553,369 +1147,391 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
                           </tbody>
                         </table>
                       </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Charts Section: 2 Columns */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Payment Breakdown Donut / Stats */}
-        <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-base font-bold text-white">
-                Ödəniş Növü Üzrə Bölgü
-              </h3>
-              <p className="text-xs text-zinc-400">Nağd, Kart və POS terminal satışları</p>
-            </div>
-            <span className="text-xs font-bold text-zinc-200 font-mono">
-              {formatAZN(totalPaid)}
-            </span>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-center gap-6 pt-2">
-            {/* Circular SVG visualization */}
-            <div className="relative w-36 h-36 shrink-0 flex items-center justify-center">
-              <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                <circle
-                  cx="50"
-                  cy="50"
-                  r="40"
-                  fill="transparent"
-                  stroke="#27272a"
-                  strokeWidth="12"
-                />
-                {totalPaid > 0 && (
-                  <>
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      fill="transparent"
-                      stroke="#10b981"
-                      strokeWidth="12"
-                      strokeDasharray={`${(cashPct * 251.2) / 100} 251.2`}
-                      strokeDashoffset="0"
-                      className="transition-all duration-500"
-                    />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      fill="transparent"
-                      stroke="#3b82f6"
-                      strokeWidth="12"
-                      strokeDasharray={`${(cardPct * 251.2) / 100} 251.2`}
-                      strokeDashoffset={`-${(cashPct * 251.2) / 100}`}
-                      className="transition-all duration-500"
-                    />
-                    <circle
-                      cx="50"
-                      cy="50"
-                      r="40"
-                      fill="transparent"
-                      stroke="#ef4444"
-                      strokeWidth="12"
-                      strokeDasharray={`${(posPct * 251.2) / 100} 251.2`}
-                      strokeDashoffset={`-${((cashPct + cardPct) * 251.2) / 100}`}
-                      className="transition-all duration-500"
-                    />
-                  </>
-                )}
-              </svg>
-              <div className="absolute text-center">
-                <span className="text-[10px] text-zinc-400 font-medium">Cəm</span>
-                <div className="text-xs font-bold text-white font-mono">
-                  {formatAZN(totalPaid)}
-                </div>
-              </div>
-            </div>
-
-            {/* Legend & Breakdown bars */}
-            <div className="flex-1 w-full space-y-3">
-              <div>
-                <div className="flex justify-between text-xs mb-1 font-medium">
-                  <span className="flex items-center gap-1.5 text-emerald-400">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-                    Nağd ({cashPct}%)
-                  </span>
-                  <span className="font-mono font-bold text-white">{formatAZN(paymentBreakdown.cash)}</span>
-                </div>
-                <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
-                  <div className="bg-emerald-500 h-full rounded-full" style={{ width: `${cashPct}%` }} />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between text-xs mb-1 font-medium">
-                  <span className="flex items-center gap-1.5 text-blue-400">
-                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
-                    Bank Kartı ({cardPct}%)
-                  </span>
-                  <span className="font-mono font-bold text-white">{formatAZN(paymentBreakdown.card)}</span>
-                </div>
-                <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
-                  <div className="bg-blue-500 h-full rounded-full" style={{ width: `${cardPct}%` }} />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between text-xs mb-1 font-medium">
-                  <span className="flex items-center gap-1.5 text-red-400">
-                    <span className="w-2.5 h-2.5 rounded-full bg-red-600 inline-block" />
-                    POS Terminal ({posPct}%)
-                  </span>
-                  <span className="font-mono font-bold text-white">{formatAZN(paymentBreakdown.pos)}</span>
-                </div>
-                <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
-                  <div className="bg-red-600 h-full rounded-full" style={{ width: `${posPct}%` }} />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Top Product Sales (Bar Chart) */}
-        <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-base font-bold text-white">
-                Məhsul Satış Statistikası
-              </h3>
-              <p className="text-xs text-zinc-400">Hansı məhsuldan neçə ədəd satılıb</p>
-            </div>
-            {/* Period Segmented Control */}
-            <div className="flex items-center p-1 bg-zinc-950 border border-zinc-800 rounded-xl">
-              <button
-                type="button"
-                onClick={() => setProductPeriod('today')}
-                className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
-                  productPeriod === 'today'
-                    ? 'bg-red-600 text-white shadow-sm'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                Bu gün
-              </button>
-              <button
-                type="button"
-                onClick={() => setProductPeriod('month')}
-                className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
-                  productPeriod === 'month'
-                    ? 'bg-red-600 text-white shadow-sm'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                Bu ay
-              </button>
-            </div>
-          </div>
-
-          {productSaleStats.length === 0 ? (
-            <div className="py-12 text-center text-xs text-zinc-500">
-              Bu dövr üçün hələ satış qeydə alınmayıb. Satış səhifəsindən yeni satış daxil edin.
-            </div>
-          ) : (
-            <div className="space-y-3 pt-2">
-              {productSaleStats.slice(0, 5).map(item => {
-                const maxQuantity = productSaleStats[0]?.quantity || 1;
-                const widthPercent = Math.min(100, Math.round((item.quantity / maxQuantity) * 100));
-                return (
-                  <div key={item.productId} className="space-y-1">
-                    <div className="flex justify-between text-xs">
-                      <span className="font-medium text-zinc-200 truncate max-w-[200px]">
-                        {item.productName}
-                      </span>
-                      <span className="text-zinc-400 font-mono">
-                        <strong className="text-red-400">{item.quantity} ədəd</strong> ({formatAZN(item.revenue)})
-                      </span>
-                    </div>
-                    <div className="w-full bg-zinc-800 h-2.5 rounded-full overflow-hidden">
-                      <div
-                        className="bg-red-600 h-full rounded-full transition-all duration-500"
-                        style={{ width: `${widthPercent}%` }}
-                      />
-                    </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           )}
-        </div>
-      </div>
 
-      {/* 7-Day Trend Chart & Inventory Stock Status */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* 7 Day Trend */}
-        <div className="lg:col-span-2 p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-base font-bold text-white">
-                Son 7 Günlük Satış Trendi
-              </h3>
-              <p className="text-xs text-zinc-400">Günlər üzrə təsdiqlənmiş dövriyyə (AZN)</p>
-            </div>
-          </div>
-
-          <div className="h-44 flex items-end justify-between gap-2 pt-6 pb-2 px-2 border-b border-zinc-800">
-            {last7Days.map(d => {
-              const heightPercent = d.amount > 0 ? Math.max(12, Math.round((d.amount / maxDayAmount) * 100)) : 6;
-              const isToday = d.dateStr === todayISO;
-              return (
-                <div key={d.dateStr} className="flex-1 flex flex-col items-center gap-2 h-full justify-end group">
-                  <div className="text-[10px] font-mono text-zinc-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                    {d.amount.toFixed(1)} ₼
-                  </div>
-                  <div
-                    className={`w-full max-w-[36px] rounded-t-lg transition-all duration-300 ${
-                      isToday
-                        ? 'bg-red-600 hover:bg-red-500 shadow-md shadow-red-600/30'
-                        : 'bg-zinc-800 hover:bg-zinc-700'
-                    }`}
-                    style={{ height: `${heightPercent}%` }}
-                    title={`${d.label}: ${d.amount.toFixed(2)} AZN`}
-                  />
-                  <span className={`text-[11px] font-mono ${isToday ? 'font-bold text-red-400' : 'text-zinc-500'}`}>
-                    {d.label}
-                  </span>
+          {/* Top Selling Products List */}
+          {productSaleStats.length > 0 && (
+            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                    Dövrün Ən Çox Satılan Top Məhsulları
+                  </h3>
                 </div>
-              );
-            })}
-          </div>
-        </div>
+                <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                  {productSaleStats.length} məhsul növü
+                </span>
+              </div>
 
-        {/* Depo: Active Stock Summary */}
-        <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md flex flex-col justify-between space-y-4">
-          <div>
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold text-white">
-                Aktiv Depo Qalığı
-              </h3>
-              <button
-                onClick={() => onNavigate('products')}
-                className="text-xs font-semibold text-red-400 hover:underline"
-              >
-                Hamısına bax
-              </button>
-            </div>
-            <p className="text-xs text-zinc-400">Məhsul üzrə aktiv say (gələn − satılan)</p>
-
-            <div className="divide-y divide-zinc-800 mt-3 max-h-48 overflow-y-auto pr-1">
-              {products.slice(0, 5).map(p => {
-                const stock = allStocks[p.id];
-                return (
-                  <div key={p.id} className="py-2.5 flex items-center justify-between text-xs">
-                    <div>
-                      <p className="font-semibold text-zinc-200 truncate max-w-[150px]">
-                        {p.name}
-                      </p>
-                      <p className="text-[10px] text-zinc-500">
-                        Gəlib: {stock?.totalPurchased + stock?.initialStock} · Satılıb: {stock?.totalSold}
-                      </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {productSaleStats.slice(0, 6).map((item, idx) => (
+                  <div
+                    key={item.productId}
+                    className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-950/70 border border-zinc-200 dark:border-zinc-800/80 flex items-center justify-between text-xs"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <span className="w-6 h-6 rounded-lg bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-bold flex items-center justify-center text-[11px]">
+                        {idx + 1}
+                      </span>
+                      <div>
+                        <div className="font-bold text-zinc-900 dark:text-white">{item.productName}</div>
+                        <div className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono">
+                          {formatAZN(item.unitPrice)} / ədəd
+                        </div>
+                      </div>
                     </div>
                     <div className="text-right">
-                      <span className={`font-mono font-bold px-2 py-0.5 rounded-lg ${
-                        stock?.isLowStock
-                          ? 'bg-red-950 text-red-400 border border-red-800'
-                          : 'bg-zinc-800 text-zinc-200'
-                      }`}>
-                        {stock?.activeStock} ədəd
-                      </span>
+                      <div className="font-bold text-red-600 dark:text-red-400 font-mono">{item.totalQuantity} ədəd</div>
+                      <div className="font-black text-zinc-900 dark:text-white font-mono">{formatAZN(item.totalRevenue)}</div>
                     </div>
                   </div>
-                );
-              })}
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────
+          TAB 3: MALİYYƏ & BALANS (Dövriyyə, Alış, Xərc, Borc, Depozit)
+         ───────────────────────────────────────────────────────── */}
+      {activeSubTab === 'finance' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Net Profit Mathematical Formula Card */}
+          <div className="p-6 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-200 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <DollarSign className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                  Dövrün Maliyyə Nəticəsi və Xalis Mənfəət
+                </h3>
+              </div>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                {dateRange.label}
+              </span>
+            </div>
+
+            {/* Formula Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+              {/* Revenue */}
+              <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-center">
+                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block">
+                  Satış Gəliri (+)
+                </span>
+                <span className="text-xl font-black text-zinc-900 dark:text-white font-mono mt-1 block">
+                  {formatAZN(periodRevenue)}
+                </span>
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                  {periodSales.length} təsdiqlənmiş satış
+                </span>
+              </div>
+
+              {/* Purchases */}
+              <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-center">
+                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block">
+                  Mal Alışı (−)
+                </span>
+                <span className="text-xl font-black text-red-600 dark:text-red-400 font-mono mt-1 block">
+                  − {formatAZN(periodPurchasesAmount)}
+                </span>
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                  {periodPurchases.length} mal qəbulu
+                </span>
+              </div>
+
+              {/* Expenses */}
+              <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-center">
+                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block">
+                  Digər Xərclər (−)
+                </span>
+                <span className="text-xl font-black text-amber-600 dark:text-amber-400 font-mono mt-1 block">
+                  − {formatAZN(periodExpensesAmount)}
+                </span>
+                <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                  İcarə, maaş, kommunal
+                </span>
+              </div>
+
+              {/* Net Profit Result */}
+              <div className={`p-4 rounded-xl border text-center ${
+                periodProfit.isProfit
+                  ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+              }`}>
+                <span className="text-xs font-bold uppercase tracking-wider block">
+                  Xalis Mənfəət (=)
+                </span>
+                <span className="text-2xl font-black font-mono mt-1 block">
+                  {formatAZN(periodProfit.netProfit)}
+                </span>
+                <span className="text-[11px]">
+                  {periodProfit.isProfit ? 'Müsbət Gəlir' : 'Zərər'}
+                </span>
+              </div>
             </div>
           </div>
 
-          <button
-            onClick={() => onNavigate('purchases')}
-            className="w-full py-2.5 px-3 bg-zinc-800 hover:bg-zinc-700 text-white font-semibold text-xs rounded-xl transition-colors text-center border border-zinc-700"
-          >
-            + Mal Qəbulu Daxil Et
-          </button>
-        </div>
-      </div>
+          {/* Customer Balances & Debts Overview */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {/* Customer Deposit Accounts */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <Wallet className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                    Müştəri Depozit Balansları
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('debts')}
+                  className="text-xs text-red-600 dark:text-red-400 hover:underline font-semibold"
+                >
+                  Hesablara Keç
+                </button>
+              </div>
 
-      {/* Recent Sales List */}
-      <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-base font-bold text-white">
-              Son Satışlar
-            </h3>
-            <p className="text-xs text-zinc-400">Ən son icra edilən və ya təsdiqlənən əməliyyatlar</p>
-          </div>
-          <button
-            onClick={() => onNavigate('pos')}
-            className="text-xs font-semibold text-red-400 hover:underline"
-          >
-            Kassa cədvəlinə keç
-          </button>
-        </div>
+              <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-950/70 border border-zinc-200 dark:border-zinc-800/80 space-y-3">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-zinc-500 dark:text-zinc-400">Cari Aktiv Müştəri Depoziti:</span>
+                  <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400 text-base">
+                    {formatAZN(totalCustomerBalance)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-zinc-500 dark:text-zinc-400">Depozitli Müştəri Sayı:</span>
+                  <span className="font-mono font-bold text-zinc-900 dark:text-white">
+                    {customerAccounts.length} nəfər
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                  <span className="text-zinc-500 dark:text-zinc-400">İndiyədək Qoyulan Ümumi Depozit:</span>
+                  <span className="font-mono font-bold text-zinc-700 dark:text-zinc-300">
+                    {formatAZN(totalDepositedAllTime)}
+                  </span>
+                </div>
+              </div>
 
-        {sales.length === 0 ? (
-          <div className="py-8 text-center text-xs text-zinc-500">
-            Hələlik heç bir satış qeydə alınmayıb. Satışlar daxil edildikcə burada görünəcək.
+              {customerAccounts.length > 0 && (
+                <div className="divide-y divide-zinc-200 dark:divide-zinc-800/80 text-xs">
+                  {customerAccounts.slice(0, 3).map(c => (
+                    <div key={c.id} className="py-2 flex items-center justify-between">
+                      <span className="font-semibold text-zinc-900 dark:text-white">{c.name}</span>
+                      <span className="font-mono font-bold text-cyan-600 dark:text-cyan-400">
+                        {formatAZN(c.balance)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Debts Overview */}
+            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-zinc-200 dark:border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-amber-500 dark:text-amber-400" />
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                    Nisyə (Borc) Vəziyyəti
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('debts')}
+                  className="text-xs text-red-600 dark:text-red-400 hover:underline font-semibold"
+                >
+                  Borclulara Keç
+                </button>
+              </div>
+
+              <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-950/70 border border-zinc-200 dark:border-zinc-800/80 space-y-3">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-zinc-500 dark:text-zinc-400">Ümumi Qalıq Borc:</span>
+                  <span className="font-mono font-bold text-amber-600 dark:text-amber-400 text-base">
+                    {formatAZN(debtOverview.totalRemainingDebt)}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-zinc-500 dark:text-zinc-400">Aktiv Borclu Sayı:</span>
+                  <span className="font-mono font-bold text-zinc-900 dark:text-white">
+                    {debtOverview.debtorCount} nəfər
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-xs pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                  <span className="text-zinc-500 dark:text-zinc-400">Ödənilmiş Nisyə Cəmi:</span>
+                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                    {formatAZN(debtOverview.totalPaidDebt)}
+                  </span>
+                </div>
+              </div>
+
+              {debts.filter(d => d.remainingAmount > 0).length > 0 && (
+                <div className="divide-y divide-zinc-200 dark:divide-zinc-800/80 text-xs">
+                  {debts
+                    .filter(d => d.remainingAmount > 0)
+                    .slice(0, 3)
+                    .map(d => (
+                      <div key={d.id} className="py-2 flex items-center justify-between">
+                        <span className="font-semibold text-zinc-900 dark:text-white">{d.debtorName}</span>
+                        <span className="font-mono font-bold text-amber-600 dark:text-amber-400">
+                          {formatAZN(d.remainingAmount)}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </div>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-zinc-950 text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
-                <tr>
-                  <th className="py-2.5 px-3">Tarix & Saat</th>
-                  <th className="py-2.5 px-3">Məhsullar</th>
-                  <th className="py-2.5 px-3">Ödəniş</th>
-                  <th className="py-2.5 px-3 text-right">Məbləğ</th>
-                  <th className="py-2.5 px-3 text-center">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800">
-                {sales.slice(0, 5).map(s => (
-                  <tr key={s.id} className="hover:bg-zinc-800/40">
-                    <td className="py-2.5 px-3 font-mono text-zinc-400 whitespace-nowrap">
-                      {formatDateAZ(s.date)} {s.time}
-                    </td>
-                    <td className="py-2.5 px-3 font-medium text-zinc-200 max-w-xs truncate">
-                      {s.items.map(i => `${i.productName} (${i.quantity} əd.)`).join(', ')}
-                    </td>
-                    <td className="py-2.5 px-3 uppercase text-[10px] font-bold">
-                      <span className={`px-2 py-0.5 rounded-full ${
-                        s.paymentType === 'naqd'
-                          ? 'bg-emerald-950 text-emerald-300 border border-emerald-900'
-                          : s.paymentType === 'kart'
-                          ? 'bg-blue-950 text-blue-300 border border-blue-900'
-                          : s.paymentType === 'pos'
-                          ? 'bg-red-950 text-red-300 border border-red-900'
-                          : 'bg-red-900 text-white font-bold'
-                      }`}>
-                        {s.paymentType === 'borc' ? `Borc (${s.debtorName || 'Adsız'})` : s.paymentType}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-right font-mono font-bold text-white whitespace-nowrap">
-                      {formatAZN(s.totalAmount)}
-                    </td>
-                    <td className="py-2.5 px-3 text-center">
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                        s.isConfirmed
-                          ? 'bg-emerald-950 text-emerald-300'
-                          : 'bg-amber-950 text-amber-300'
-                      }`}>
-                        {s.isConfirmed ? 'Təsdiqlənib' : 'Gözləmədə'}
-                      </span>
-                    </td>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────
+          TAB 4: DEPO & QALIQLAR (Aktiv Qalıqlar, Kritik Hədlər)
+         ───────────────────────────────────────────────────────── */}
+      {activeSubTab === 'stock' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Low Stock Warning Alert if any */}
+          {lowStockItems.length > 0 ? (
+            <div className="p-4 rounded-2xl bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-600 text-white flex items-center justify-center shrink-0 shadow-md">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-red-900 dark:text-red-200">
+                    Depoda {lowStockItems.length} məhsulun qalığı kritik həddədir ({settings.minStockThreshold} ədəd və ya az)!
+                  </h4>
+                  <p className="text-xs text-red-700 dark:text-red-300/80 mt-0.5">
+                    {lowStockItems.map(i => `${i.product.name} (${i.activeStock} ədəd)`).join(' · ')}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate('purchases')}
+                className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl transition-colors shrink-0 shadow-sm"
+              >
+                Mal Qəbulu Et
+              </button>
+            </div>
+          ) : (
+            <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/60 text-emerald-800 dark:text-emerald-300 flex items-center gap-3">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+              <div className="text-xs">
+                <span className="font-bold">Bütün məhsulların anbar qalığı normal səviyyədədir.</span> Heç bir məhsul minimum həddən ({settings.minStockThreshold} ədəd) aşağı düşməyib.
+              </div>
+            </div>
+          )}
+
+          {/* Inventory Stock Table */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-200 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <PackageCheck className="w-5 h-5 text-amber-500 dark:text-amber-400" />
+                <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                  Depo Məhsullarının Aktiv Qalıq Cədvəli ({allStocksList.length} Məhsul)
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onNavigate('purchases')}
+                  className="px-3 py-1.5 text-xs font-bold bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-white rounded-xl border border-zinc-200 dark:border-zinc-700 transition-colors"
+                >
+                  Mal Qəbulu
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onNavigate('products')}
+                  style={{ backgroundColor: primaryColor }}
+                  className="px-3 py-1.5 text-xs font-bold text-white rounded-xl transition-colors hover:opacity-90"
+                >
+                  Məhsul Əlavə Et
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                    <th className="py-2.5 px-3">Məhsul</th>
+                    <th className="py-2.5 px-3">Kateqoriya</th>
+                    <th className="py-2.5 px-3 text-right">Qiymət</th>
+                    <th className="py-2.5 px-3 text-right">Daxil Olan</th>
+                    <th className="py-2.5 px-3 text-right">Satılan</th>
+                    <th className="py-2.5 px-3 text-right">Aktiv Qalıq</th>
+                    <th className="py-2.5 px-3 text-right">Vəziyyət</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
+                  {allStocksList.map(stock => {
+                    const isLow = stock.isLowStock;
+                    const isOut = stock.activeStock <= 0;
+
+                    return (
+                      <tr key={stock.product.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors">
+                        <td className="py-3 px-3 font-semibold text-zinc-900 dark:text-white">
+                          <div>{stock.product.name}</div>
+                          {stock.product.barcode && (
+                            <div className="text-[10px] text-zinc-500 font-mono">
+                              Barkod: {stock.product.barcode}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-zinc-600 dark:text-zinc-400">
+                          {stock.product.category}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-zinc-700 dark:text-zinc-300">
+                          {formatAZN(stock.product.salePrice)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-zinc-600 dark:text-zinc-400">
+                          {stock.initialStock + stock.totalPurchased}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-zinc-600 dark:text-zinc-400">
+                          {stock.totalSold}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-black text-sm">
+                          <span
+                            className={
+                              isOut
+                                ? 'text-red-600 dark:text-red-500'
+                                : isLow
+                                ? 'text-amber-600 dark:text-amber-400'
+                                : 'text-zinc-900 dark:text-white'
+                            }
+                          >
+                            {stock.activeStock}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                              isOut
+                                ? 'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800'
+                                : isLow
+                                ? 'bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800'
+                                : 'bg-emerald-50 dark:bg-zinc-800 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-zinc-700'
+                            }`}
+                          >
+                            {isOut ? 'Bitib' : isLow ? 'Kritik Qalıq' : 'Normal'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 };

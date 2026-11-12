@@ -2,15 +2,36 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
+:root {
+  --app-primary: #dc2626;
+  --app-primary-soft: rgba(220, 38, 38, 0.14);
+}
+
 @layer base {
   body {
     font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
-  
+
   .font-mono, code, .tabular-nums {
     font-family: 'JetBrains Mono', monospace;
     font-variant-numeric: tabular-nums;
   }
+}
+
+.bg-app-primary {
+  background-color: var(--app-primary, #dc2626);
+}
+
+.text-app-primary {
+  color: var(--app-primary, #dc2626);
+}
+
+.border-app-primary {
+  border-color: var(--app-primary, #dc2626);
+}
+
+.bg-app-primary-soft {
+  background-color: var(--app-primary-soft, rgba(220, 38, 38, 0.14));
 }
 
 /* Custom scrollbars for POS and table views */

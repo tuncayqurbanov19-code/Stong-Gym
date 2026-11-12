@@ -14,6 +14,9 @@ export interface ProductSaleCount {
   productName: string;
   quantity: number;
   revenue: number;
+  unitPrice?: number;
+  totalQuantity?: number;
+  totalRevenue?: number;
 }
 
 export interface CategoryProductStat {
@@ -223,7 +226,14 @@ export function calculateProductSaleCounts(sales: Sale[]): ProductSaleCount[] {
     }
   }
 
-  return Object.values(map).sort((a, b) => b.quantity - a.quantity);
+  return Object.values(map)
+    .map(p => ({
+      ...p,
+      unitPrice: p.quantity > 0 ? Math.round((p.revenue / p.quantity) * 100) / 100 : 0,
+      totalQuantity: p.quantity,
+      totalRevenue: p.revenue,
+    }))
+    .sort((a, b) => b.quantity - a.quantity);
 }
 
 /**
@@ -238,6 +248,7 @@ export function calculateNetProfit(
   totalGoodsPurchases: number;
   totalExpenses: number;
   netProfit: number;
+  isProfit: boolean;
 } {
   const rev = Number(totalRevenue) || 0;
   const purchases = Number(totalGoodsPurchases) || 0;
@@ -249,33 +260,41 @@ export function calculateNetProfit(
     totalGoodsPurchases: purchases,
     totalExpenses: exp,
     netProfit: net,
+    isProfit: net >= 0,
   };
 }
 
 /**
- * Checks discrepancy between daily report and sales for a given date
+ * Checks discrepancy between daily report and sales + collected debt payments for a given date
  */
 export function checkDailyReportDiscrepancy(
   dailyReport: DailyReport | undefined,
-  salesForDay: Sale[]
+  salesForDay: Sale[],
+  debtPaymentsForDay: DebtRecord['payments'] = []
 ): DiscrepancyResult {
   const salesTotal = salesForDay
-    .filter(s => s.isConfirmed)
+    .filter(s => s.isConfirmed && s.paymentType !== 'borc' && s.paymentType !== 'balans')
     .reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
 
+  const debtCollectedTotal = debtPaymentsForDay.reduce(
+    (sum, p) => sum + (Number(p.amount) || 0),
+    0
+  );
+
+  const expectedDrawerTotal = Math.round((salesTotal + debtCollectedTotal) * 100) / 100;
   const reportTotal = dailyReport ? Number(dailyReport.totalAmount) || 0 : 0;
-  const diff = Math.round((reportTotal - salesTotal) * 100) / 100;
+  const diff = Math.round((reportTotal - expectedDrawerTotal) * 100) / 100;
   const isMatching = Math.abs(diff) < 0.01;
 
   let message = 'Uyğundur';
   if (!isMatching) {
-    const diffText = diff > 0 ? `+${diff.toFixed(2)} AZN artıq` : `${diff.toFixed(2)} AZN əskik`;
+    const diffText = diff > 0 ? `+${diff.toFixed(2)} ₼ artıq` : `${diff.toFixed(2)} ₼ əskik`;
     message = `Fərq var – yoxlayın (${diffText})`;
   }
 
   return {
     dailyReportTotal: reportTotal,
-    salesTotal,
+    salesTotal: expectedDrawerTotal,
     difference: diff,
     isMatching,
     message,
@@ -283,7 +302,7 @@ export function checkDailyReportDiscrepancy(
 }
 
 /**
- * Checks if a customer already has existing unpaid debt
+ * Checks if a customer already has existing unpaid or partially paid debt
  */
 export function checkCustomerDebt(
   customerName: string,
@@ -301,7 +320,9 @@ export function checkCustomerDebt(
   }
 
   const customerDebts = debts.filter(d => {
-    if (d.status !== 'borcdadir' || Number(d.remainingAmount) <= 0) return false;
+    if ((d.status !== 'borcdadir' && d.status !== 'qismen') || Number(d.remainingAmount) <= 0) {
+      return false;
+    }
     const dName = d.debtorName.trim().toLowerCase();
     const dWords = dName.split(/\s+/);
     const inputWords = trimmed.split(/\s+/);
@@ -329,7 +350,7 @@ export function checkCustomerDebt(
     totalRemainingDebt,
     unpaidDebtCount: customerDebts.length,
     warningMessage: hasDebt
-      ? `${properName} adlı müştərinin ${formattedDebt} AZN borcu var idi!`
+      ? `${properName} adlı müştərinin ${formattedDebt} ₼ borcu var idi!`
       : '',
   };
 }
@@ -341,13 +362,23 @@ export function calculateDebtOverview(debts: DebtRecord[]): {
   totalRemainingDebt: number;
   totalDebtorsCount: number;
   unpaidDebtorsCount: number;
+  debtorCount: number;
+  totalPaidDebt: number;
+  partialCount: number;
 } {
   const unpaidDebts = debts.filter(
-    d => d.status === 'borcdadir' && Number(d.remainingAmount) > 0
+    d => (d.status === 'borcdadir' || d.status === 'qismen') && Number(d.remainingAmount) > 0
   );
+
+  const partialCount = debts.filter(d => d.status === 'qismen').length;
 
   const totalRemainingDebt = unpaidDebts.reduce(
     (sum, d) => sum + (Number(d.remainingAmount) || 0),
+    0
+  );
+
+  const totalPaidDebt = debts.reduce(
+    (sum, d) => sum + (Number(d.paidAmount) || 0),
     0
   );
 
@@ -359,8 +390,298 @@ export function calculateDebtOverview(debts: DebtRecord[]): {
   );
 
   return {
-    totalRemainingDebt,
+    totalRemainingDebt: Math.round(totalRemainingDebt * 100) / 100,
     totalDebtorsCount: allUnique.size,
     unpaidDebtorsCount: uniqueUnpaid.size,
+    debtorCount: uniqueUnpaid.size,
+    totalPaidDebt: Math.round(totalPaidDebt * 100) / 100,
+    partialCount,
   };
+}
+
+export interface StaffOperationItem {
+  id: string;
+  kind: 'sale' | 'debt_payment';
+  date: string;
+  time: string;
+  staffUsername: string;
+  paymentMethod: 'naqd' | 'kart' | 'pos' | 'balans' | 'borc';
+  amount: number;
+  description: string;
+  customerOrNote?: string;
+  badgeText?: string;
+}
+
+export interface StaffPaymentRow {
+  staffUsername: string;
+  staffName: string;
+  naqd: number;
+  kart: number;
+  pos: number;
+  balans: number;
+  nisye: number;
+  salesCount: number;
+  debtPaymentsCount: number;
+  avgCheck: number;
+  salesInflow: number;
+  debtInflow: number;
+  totalInflow: number;
+  operations: StaffOperationItem[];
+}
+
+export interface DailyStaffBreakdownSummary {
+  rows: StaffPaymentRow[];
+  totals: {
+    naqd: number;
+    kart: number;
+    pos: number;
+    balans: number;
+    nisye: number;
+    salesCount: number;
+    debtPaymentsCount: number;
+    avgCheck: number;
+    salesInflow: number;
+    debtInflow: number;
+    totalInflow: number;
+  };
+  allOperations: StaffOperationItem[];
+}
+
+/**
+ * Groups confirmed sales and collected debt payments by responsible staff member
+ * and payment method without double counting.
+ *
+ * No double counting:
+ * - Credit sales (`borc`) appear ONLY in `nisye` (not counted in drawer cash/card/pos inflow).
+ * - Debt collections (`debt.payments`) appear in `naqd`/`kart`/`pos` & `debtInflow` on their `paidAt` date,
+ *   never as duplicate product sales.
+ */
+export function calculateDailyStaffBreakdown(params: {
+  sales: Sale[];
+  debts: DebtRecord[];
+  staffDisplayMap?: Record<string, string>;
+  startDate: string;
+  endDate: string;
+  staffFilter?: string; // 'all' or username
+  paymentFilter?: string; // 'all' | 'naqd' | 'kart' | 'pos' | 'balans' | 'borc'
+}): DailyStaffBreakdownSummary {
+  const {
+    sales,
+    debts,
+    staffDisplayMap = {},
+    startDate,
+    endDate,
+    staffFilter = 'all',
+    paymentFilter = 'all',
+  } = params;
+
+  const normalizeStaff = (raw?: string) => (raw || 'admin').trim() || 'admin';
+  const normalizedStaffFilter = staffFilter.toLowerCase();
+
+  const rowMap: Record<string, StaffPaymentRow> = {};
+  const ensureRow = (username: string): StaffPaymentRow => {
+    const key = username.toLowerCase();
+    if (!rowMap[key]) {
+      rowMap[key] = {
+        staffUsername: username,
+        staffName: staffDisplayMap[key] || username,
+        naqd: 0,
+        kart: 0,
+        pos: 0,
+        balans: 0,
+        nisye: 0,
+        salesCount: 0,
+        debtPaymentsCount: 0,
+        avgCheck: 0,
+        salesInflow: 0,
+        debtInflow: 0,
+        totalInflow: 0,
+        operations: [],
+      };
+    }
+    return rowMap[key];
+  };
+
+  // Track gross sales per staff for average check
+  const grossSalesSumByStaff: Record<string, number> = {};
+
+  // 1. Aggregate confirmed sales
+  for (const s of sales) {
+    if (!s.isConfirmed) continue;
+    if (s.date < startDate || s.date > endDate) continue;
+
+    const staffUser = normalizeStaff(s.createdBy);
+    if (normalizedStaffFilter !== 'all' && staffUser.toLowerCase() !== normalizedStaffFilter) {
+      continue;
+    }
+
+    if (paymentFilter !== 'all' && s.paymentType !== paymentFilter) {
+      continue;
+    }
+
+    const row = ensureRow(staffUser);
+    const amt = Number(s.totalAmount) || 0;
+    row.salesCount += 1;
+    grossSalesSumByStaff[staffUser.toLowerCase()] =
+      (grossSalesSumByStaff[staffUser.toLowerCase()] || 0) + amt;
+
+    switch (s.paymentType) {
+      case 'naqd':
+        row.naqd += amt;
+        row.salesInflow += amt;
+        break;
+      case 'kart':
+        row.kart += amt;
+        row.salesInflow += amt;
+        break;
+      case 'pos':
+        row.pos += amt;
+        row.salesInflow += amt;
+        break;
+      case 'balans':
+        row.balans += amt;
+        break;
+      case 'borc':
+        row.nisye += amt;
+        break;
+    }
+
+    row.operations.push({
+      id: s.id,
+      kind: 'sale',
+      date: s.date,
+      time: s.time || '--:--',
+      staffUsername: staffUser,
+      paymentMethod: s.paymentType,
+      amount: amt,
+      description: s.items.map(i => `${i.productName} (${i.quantity}x)`).join(', '),
+      customerOrNote: s.debtorName,
+      badgeText: s.paymentType === 'borc' ? 'Nisyə satış' : 'Satış',
+    });
+  }
+
+  // 2. Aggregate collected debt payments (without double counting!)
+  for (const debt of debts) {
+    for (const p of debt.payments || []) {
+      const paidDate = (p.paidAt || p.date || '').split('T')[0];
+      if (!paidDate || paidDate < startDate || paidDate > endDate) continue;
+
+      const staffUser = normalizeStaff(p.receivedBy);
+      if (normalizedStaffFilter !== 'all' && staffUser.toLowerCase() !== normalizedStaffFilter) {
+        continue;
+      }
+
+      const rawMethod = (p.paymentMethod || 'naqd').toLowerCase();
+      const mappedMethod: 'naqd' | 'kart' | 'pos' =
+        rawMethod === 'kart' ? 'kart' : rawMethod === 'pos' || rawMethod === 'kocurme' ? 'pos' : 'naqd';
+
+      if (paymentFilter !== 'all' && mappedMethod !== paymentFilter) {
+        continue;
+      }
+
+      const row = ensureRow(staffUser);
+      const amt = Number(p.amount) || 0;
+      row.debtPaymentsCount += 1;
+      row.debtInflow += amt;
+
+      if (mappedMethod === 'naqd') row.naqd += amt;
+      else if (mappedMethod === 'kart') row.kart += amt;
+      else row.pos += amt;
+
+      const timeStr = p.createdAt && p.createdAt.includes('T')
+        ? new Date(p.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })
+        : '--:--';
+
+      row.operations.push({
+        id: p.id,
+        kind: 'debt_payment',
+        date: paidDate,
+        time: timeStr,
+        staffUsername: staffUser,
+        paymentMethod: mappedMethod,
+        amount: amt,
+        description: `${debt.debtorName} — ${debt.items.map(i => i.productName).join(', ') || 'Borc'}`,
+        customerOrNote: p.note || 'Borc ödənişi',
+        badgeText: 'Borc ödənişi (ödənildi)',
+      });
+    }
+  }
+
+  const rows: StaffPaymentRow[] = Object.values(rowMap)
+    .map(r => {
+      const grossSales = grossSalesSumByStaff[r.staffUsername.toLowerCase()] || 0;
+      const totalInflow = Math.round((r.salesInflow + r.debtInflow) * 100) / 100;
+      const avgCheck = r.salesCount > 0 ? Math.round((grossSales / r.salesCount) * 100) / 100 : 0;
+      const sortedOps = [...r.operations].sort((a, b) => {
+        const cmpDate = b.date.localeCompare(a.date);
+        if (cmpDate !== 0) return cmpDate;
+        return b.time.localeCompare(a.time);
+      });
+
+      return {
+        ...r,
+        naqd: Math.round(r.naqd * 100) / 100,
+        kart: Math.round(r.kart * 100) / 100,
+        pos: Math.round(r.pos * 100) / 100,
+        balans: Math.round(r.balans * 100) / 100,
+        nisye: Math.round(r.nisye * 100) / 100,
+        salesInflow: Math.round(r.salesInflow * 100) / 100,
+        debtInflow: Math.round(r.debtInflow * 100) / 100,
+        totalInflow,
+        avgCheck,
+        operations: sortedOps,
+      };
+    })
+    .sort((a, b) => b.totalInflow - a.totalInflow || a.staffName.localeCompare(b.staffName));
+
+  const totals = rows.reduce(
+    (acc, r) => ({
+      naqd: acc.naqd + r.naqd,
+      kart: acc.kart + r.kart,
+      pos: acc.pos + r.pos,
+      balans: acc.balans + r.balans,
+      nisye: acc.nisye + r.nisye,
+      salesCount: acc.salesCount + r.salesCount,
+      debtPaymentsCount: acc.debtPaymentsCount + r.debtPaymentsCount,
+      avgCheck: 0,
+      salesInflow: acc.salesInflow + r.salesInflow,
+      debtInflow: acc.debtInflow + r.debtInflow,
+      totalInflow: acc.totalInflow + r.totalInflow,
+    }),
+    {
+      naqd: 0,
+      kart: 0,
+      pos: 0,
+      balans: 0,
+      nisye: 0,
+      salesCount: 0,
+      debtPaymentsCount: 0,
+      avgCheck: 0,
+      salesInflow: 0,
+      debtInflow: 0,
+      totalInflow: 0,
+    }
+  );
+
+  const totalGrossSales = Object.values(grossSalesSumByStaff).reduce((s, v) => s + v, 0);
+  totals.avgCheck =
+    totals.salesCount > 0 ? Math.round((totalGrossSales / totals.salesCount) * 100) / 100 : 0;
+  totals.naqd = Math.round(totals.naqd * 100) / 100;
+  totals.kart = Math.round(totals.kart * 100) / 100;
+  totals.pos = Math.round(totals.pos * 100) / 100;
+  totals.balans = Math.round(totals.balans * 100) / 100;
+  totals.nisye = Math.round(totals.nisye * 100) / 100;
+  totals.salesInflow = Math.round(totals.salesInflow * 100) / 100;
+  totals.debtInflow = Math.round(totals.debtInflow * 100) / 100;
+  totals.totalInflow = Math.round(totals.totalInflow * 100) / 100;
+
+  const allOperations = rows
+    .flatMap(r => r.operations)
+    .sort((a, b) => {
+      const cmp = b.date.localeCompare(a.date);
+      if (cmp !== 0) return cmp;
+      return b.time.localeCompare(a.time);
+    });
+
+  return { rows, totals, allOperations };
 }

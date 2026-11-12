@@ -68,12 +68,21 @@ export interface Sale {
   createdBy: string;
 }
 
+export type DebtPaymentMethod = 'naqd' | 'kart' | 'pos' | 'kocurme';
+
 export interface DebtPayment {
   id: string;
-  date: string;
+  debtId?: string;
+  date: string; // YYYY-MM-DD
+  paidAt?: string; // YYYY-MM-DD (alias for DB paid_at)
   amount: number;
+  paymentMethod?: DebtPaymentMethod;
+  receivedBy?: string;
   note?: string;
+  createdAt?: string;
 }
+
+export type DebtStatus = 'borcdadir' | 'qismen' | 'odanilib';
 
 export interface DebtRecord {
   id: string;
@@ -87,7 +96,7 @@ export interface DebtRecord {
   paidAmount: number;
   remainingAmount: number;
   date: string; // YYYY-MM-DD
-  status: 'borcdadir' | 'odanilib';
+  status: DebtStatus;
   saleId?: string;
   notes?: string;
   payments: DebtPayment[];
@@ -145,11 +154,16 @@ export interface Expense {
   createdBy: string;
 }
 
+export type LogoSize = 'sm' | 'md' | 'lg';
+
 export interface AppSettings {
   minStockThreshold: number;
   autoConfirmSales: boolean;
   barName: string;
   enablePushNotifications: boolean;
+  logoUrl?: string;
+  primaryColor: string;
+  logoSize: LogoSize;
 }
 
 export interface AuditLog {

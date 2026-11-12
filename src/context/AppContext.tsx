@@ -11,6 +11,8 @@ import {
   Expense,
   AppSettings,
   AuditLog,
+  DebtPayment,
+  DebtPaymentMethod,
 } from '../types';
 import { getTodayISODate, getCurrentTimeHHMM } from '../utils/dateUtils';
 import { calculateProductStock } from '../utils/stockCalculations';
@@ -31,6 +33,8 @@ import {
   mapPurchaseToDB,
   mapDBToDebt,
   mapDebtToDB,
+  mapDBToDebtPayment,
+  mapDebtPaymentToDB,
   mapDBToDailyReport,
   mapDailyReportToDB,
   mapDBToExpense,
@@ -41,7 +45,10 @@ import {
   mapAuditLogToDB,
   mapDBToCustomerAccount,
   mapCustomerAccountToDB,
+  applyAppSettingsRows,
+  serializeSettingsToKV,
 } from '../lib/supabase';
+import { updateBrowserBranding } from '../utils/logoUtils';
 import {
   INITIAL_SETTINGS,
   INITIAL_USERS,
@@ -65,6 +72,21 @@ const INITIAL_AUDIT_LOGS: AuditLog[] = [
     details: 'Zal Barı idarəetmə bazası 11.11.2026 nüsxəsi ilə işə salındı.',
   },
 ];
+
+export interface ToastNotice {
+  id: string;
+  type: 'success' | 'error' | 'info';
+  message: string;
+}
+
+export interface AcceptDebtPaymentParams {
+  debtId: string;
+  amount: number;
+  paymentMethod: DebtPaymentMethod;
+  receivedBy?: string;
+  date?: string;
+  note?: string;
+}
 
 interface AppContextType {
   currentUser: User | null;
@@ -95,6 +117,8 @@ interface AppContextType {
   debts: DebtRecord[];
   addDebt: (debt: Omit<DebtRecord, 'id' | 'createdAt' | 'updatedAt' | 'payments' | 'remainingAmount' | 'status'>) => void;
   payDebt: (debtId: string, amount: number, note?: string) => void;
+  acceptDebtPayment: (params: AcceptDebtPaymentParams) => Promise<{ success: boolean; error?: string }>;
+  deleteDebtPayment: (debtId: string, paymentId: string) => Promise<{ success: boolean; error?: string }>;
   customerAccounts: CustomerAccount[];
   depositToCustomer: (
     customerName: string,
@@ -121,7 +145,8 @@ interface AppContextType {
   addExpense: (expense: Omit<Expense, 'id' | 'createdAt' | 'createdBy'>) => void;
   deleteExpense: (id: string) => void;
   settings: AppSettings;
-  updateSettings: (newSettings: Partial<AppSettings>) => void;
+  settingsLoading: boolean;
+  updateSettings: (newSettings: Partial<AppSettings>) => Promise<{ success: boolean; error?: string }>;
   auditLogs: AuditLog[];
   resetToSampleData: () => void;
   resetToOriginalBackup: () => void;
@@ -137,6 +162,9 @@ interface AppContextType {
   supabaseStatus: string;
   syncAllLocalDataToSupabase: () => Promise<{ success: boolean; error?: string }>;
   reloadFromSupabase: () => Promise<void>;
+  toast: ToastNotice | null;
+  showToast: (type: ToastNotice['type'], message: string) => void;
+  dismissToast: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -195,9 +223,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loadFromStorage('dailyReports', INITIAL_DAILY_REPORTS)
   );
   const [expenses, setExpenses] = useState<Expense[]>(() => loadFromStorage('expenses', INITIAL_EXPENSES));
-  const [settings, setSettings] = useState<AppSettings>(() =>
-    loadFromStorage('settings', INITIAL_SETTINGS)
-  );
+  const [settings, setSettings] = useState<AppSettings>(() => ({
+    ...INITIAL_SETTINGS,
+    ...loadFromStorage('settings', INITIAL_SETTINGS),
+  }));
+  const [settingsLoading, setSettingsLoading] = useState<boolean>(() => isSupabaseConfigured());
+  const [toast, setToast] = useState<ToastNotice | null>(null);
+
+  const showToast = useCallback((type: ToastNotice['type'], message: string) => {
+    const id = `toast-${Date.now()}`;
+    setToast({ id, type, message });
+    setTimeout(() => {
+      setToast(prev => (prev?.id === id ? null : prev));
+    }, 4500);
+  }, []);
+
+  const dismissToast = useCallback(() => setToast(null), []);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() =>
     loadFromStorage('auditLogs', INITIAL_AUDIT_LOGS)
   );
@@ -222,9 +263,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Reload all records from Supabase
   const reloadFromSupabase = useCallback(async () => {
     const supabase = getSupabaseClient();
-    if (!supabase) return;
+    if (!supabase) {
+      setSettingsLoading(false);
+      return;
+    }
 
     try {
+      setSettingsLoading(true);
       setSupabaseStatus('Supabase-dən məlumatlar yüklənir...');
       const [
         prodsRes,
@@ -232,6 +277,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         salesRes,
         purchasesRes,
         debtsRes,
+        debtPaymentsRes,
         reportsRes,
         expensesRes,
         settingsRes,
@@ -243,9 +289,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         supabase.from('sales').select('*').order('created_at', { ascending: false }),
         supabase.from('purchases').select('*').order('created_at', { ascending: false }),
         supabase.from('debts').select('*').order('created_at', { ascending: false }),
+        supabase.from('debt_payments').select('*').order('created_at', { ascending: false }),
         supabase.from('daily_reports').select('*').order('date', { ascending: false }),
         supabase.from('expenses').select('*').order('created_at', { ascending: false }),
-        supabase.from('app_settings').select('*').eq('id', 'global').maybeSingle(),
+        supabase.from('app_settings').select('*'),
         supabase.from('audit_logs').select('*').order('timestamp', { ascending: false }).limit(100),
         supabase.from('customer_accounts').select('*').order('name'),
       ]);
@@ -254,19 +301,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (usersRes.data && usersRes.data.length > 0) setUsers(usersRes.data.map(mapDBToUser));
       if (salesRes.data) setSales(salesRes.data.map(mapDBToSale));
       if (purchasesRes.data) setPurchases(purchasesRes.data.map(mapDBToPurchase));
-      if (debtsRes.data) setDebts(debtsRes.data.map(mapDBToDebt));
+
+      if (debtsRes.data) {
+        const mappedDebts = debtsRes.data.map(mapDBToDebt);
+        if (!debtPaymentsRes.error && debtPaymentsRes.data) {
+          const paymentsByDebt: Record<string, DebtPayment[]> = {};
+          for (const row of debtPaymentsRes.data) {
+            const p = mapDBToDebtPayment(row);
+            if (!paymentsByDebt[p.debtId]) paymentsByDebt[p.debtId] = [];
+            paymentsByDebt[p.debtId].push(p);
+          }
+          setDebts(
+            mappedDebts.map(d => {
+              const normalizedPayments = paymentsByDebt[d.id];
+              if (normalizedPayments && normalizedPayments.length > 0) {
+                return { ...d, payments: normalizedPayments };
+              }
+              return d;
+            })
+          );
+        } else {
+          setDebts(mappedDebts);
+        }
+      }
+
       if (customersRes.data && customersRes.data.length > 0) {
         setCustomerAccounts(customersRes.data.map(mapDBToCustomerAccount));
       }
       if (reportsRes.data) setDailyReports(reportsRes.data.map(mapDBToDailyReport));
       if (expensesRes.data) setExpenses(expensesRes.data.map(mapDBToExpense));
-      if (settingsRes.data) {
-        setSettings({
-          minStockThreshold: Number(settingsRes.data.min_stock_threshold) || 5,
-          autoConfirmSales: Boolean(settingsRes.data.auto_confirm_sales),
-          barName: settingsRes.data.bar_name || 'Zal Barı',
-          enablePushNotifications: Boolean(settingsRes.data.enable_push_notifications),
-        });
+
+      if (!settingsRes.error && settingsRes.data && settingsRes.data.length > 0) {
+        const firstRow = settingsRes.data[0] as any;
+        if ('key' in firstRow && 'value' in firstRow) {
+          setSettings(prev => applyAppSettingsRows(settingsRes.data as { key: string; value: string }[], prev));
+        } else {
+          const globalRow =
+            settingsRes.data.find((r: any) => r.id === 'global') || firstRow;
+          setSettings(prev => ({
+            ...prev,
+            minStockThreshold: Number(globalRow.min_stock_threshold) || prev.minStockThreshold,
+            autoConfirmSales:
+              globalRow.auto_confirm_sales !== undefined
+                ? Boolean(globalRow.auto_confirm_sales)
+                : prev.autoConfirmSales,
+            barName: globalRow.bar_name || prev.barName,
+            enablePushNotifications:
+              globalRow.enable_push_notifications !== undefined
+                ? Boolean(globalRow.enable_push_notifications)
+                : prev.enablePushNotifications,
+            logoUrl: globalRow.logo_url || undefined,
+          }));
+        }
       }
       if (logsRes.data && logsRes.data.length > 0) setAuditLogs(logsRes.data.map(mapDBToAuditLog));
 
@@ -275,6 +361,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {
       console.warn('reloadFromSupabase error:', e);
       setSupabaseStatus('Lokal rejim (Supabase cavab vermir)');
+    } finally {
+      setSettingsLoading(false);
     }
   }, []);
 
@@ -348,9 +436,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         } else if (payload.eventType === 'UPDATE') {
           const updated = mapDBToDebt(payload.new);
-          setDebts((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+          setDebts((prev) =>
+            prev.map((d) => {
+              if (d.id !== updated.id) return d;
+              const mergedPayments =
+                updated.payments && updated.payments.length > 0 ? updated.payments : d.payments;
+              return { ...updated, payments: mergedPayments };
+            })
+          );
         } else if (payload.eventType === 'DELETE') {
           setDebts((prev) => prev.filter((d) => d.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'debt_payments' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'INSERT') {
+          const newPay = mapDBToDebtPayment(payload.new);
+          setDebts((prev) =>
+            prev.map((d) => {
+              if (d.id !== newPay.debtId) return d;
+              if (d.payments.some((p) => p.id === newPay.id)) return d;
+              return { ...d, payments: [newPay, ...d.payments] };
+            })
+          );
+        } else if (payload.eventType === 'DELETE') {
+          const oldId = payload.old?.id;
+          if (oldId) {
+            setDebts((prev) =>
+              prev.map((d) => ({
+                ...d,
+                payments: d.payments.filter((p) => p.id !== oldId),
+              }))
+            );
+          }
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'daily_reports' }, (payload) => {
@@ -398,12 +516,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'app_settings' }, (payload) => {
         if (!isMounted) return;
         if (payload.eventType === 'UPDATE' || payload.eventType === 'INSERT') {
-          setSettings({
-            minStockThreshold: Number(payload.new.min_stock_threshold) || 5,
-            autoConfirmSales: Boolean(payload.new.auto_confirm_sales),
-            barName: payload.new.bar_name || 'Zal Barı',
-            enablePushNotifications: Boolean(payload.new.enable_push_notifications),
-          });
+          const row = payload.new as any;
+          if ('key' in row && 'value' in row) {
+            setSettings((prev) => applyAppSettingsRows([{ key: row.key, value: row.value }], prev));
+          } else {
+            setSettings((prev) => ({
+              ...prev,
+              minStockThreshold: Number(row.min_stock_threshold) || prev.minStockThreshold,
+              autoConfirmSales:
+                row.auto_confirm_sales !== undefined ? Boolean(row.auto_confirm_sales) : prev.autoConfirmSales,
+              barName: row.bar_name || prev.barName,
+              enablePushNotifications:
+                row.enable_push_notifications !== undefined
+                  ? Boolean(row.enable_push_notifications)
+                  : prev.enablePushNotifications,
+              logoUrl: row.logo_url || undefined,
+            }));
+          }
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'customer_accounts' }, (payload) => {
@@ -445,13 +574,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      await supabase.from('app_settings').upsert({
-        id: 'global',
-        min_stock_threshold: settings.minStockThreshold,
-        auto_confirm_sales: settings.autoConfirmSales,
-        bar_name: settings.barName,
-        enable_push_notifications: settings.enablePushNotifications,
-      });
+      const kvRows = serializeSettingsToKV(settings).map(r => ({
+        ...r,
+        updated_at: new Date().toISOString(),
+      }));
+      const kvRes = await supabase.from('app_settings').upsert(kvRows, { onConflict: 'key' });
+      if (kvRes.error) {
+        // Fallback to legacy schema if migration hasn't run yet
+        await supabase.from('app_settings').upsert({
+          id: 'global',
+          min_stock_threshold: settings.minStockThreshold,
+          auto_confirm_sales: settings.autoConfirmSales,
+          bar_name: settings.barName,
+          enable_push_notifications: settings.enablePushNotifications,
+          logo_url: settings.logoUrl || null,
+        });
+      }
 
       if (users.length > 0) {
         await supabase.from('users').upsert(users.map(mapUserToDB));
@@ -467,6 +605,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       if (debts.length > 0) {
         await supabase.from('debts').upsert(debts.map(mapDebtToDB));
+        const allPayments = debts.flatMap(d =>
+          (d.payments || []).map(p => mapDebtPaymentToDB({ ...p, debtId: d.id }))
+        );
+        if (allPayments.length > 0) {
+          await supabase.from('debt_payments').upsert(allPayments);
+        }
       }
       if (customerAccounts.length > 0) {
         await supabase.from('customer_accounts').upsert(customerAccounts.map(mapCustomerAccountToDB));
@@ -549,6 +693,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     saveToDualStorage('settings', settings);
+    const primary = settings.primaryColor || '#dc2626';
+    if (typeof document !== 'undefined') {
+      document.documentElement.style.setProperty('--app-primary', primary);
+      document.documentElement.style.setProperty('--app-primary-soft', `${primary}22`);
+    }
+    updateBrowserBranding(settings.logoUrl, settings.barName, primary);
   }, [settings]);
 
   useEffect(() => {
@@ -628,7 +778,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addUser = (newUser: Omit<User, 'id' | 'createdAt'>) => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin istifadəçi əlavə edə bilər!');
+      showToast('error', 'İcazə yoxdur: Yalnız Admin istifadəçi əlavə edə bilər!');
       return;
     }
     const user: User = {
@@ -647,7 +797,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateUser = (id: string, updates: Partial<User>) => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin istifadəçi məlumatlarını dəyişə bilər!');
+      showToast('error', 'İcazə yoxdur: Yalnız Admin istifadəçi məlumatlarını dəyişə bilər!');
       return;
     }
     setUsers(prev => prev.map(u => (u.id === id ? { ...u, ...updates } : u)));
@@ -670,7 +820,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteUser = (id: string) => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin istifadəçi silə bilər!');
+      showToast('error', 'İcazə yoxdur: Yalnız Admin istifadəçi silə bilər!');
       return;
     }
     const target = users.find(u => u.id === id);
@@ -685,7 +835,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addProduct = (newProd: Omit<Product, 'id' | 'createdAt'>) => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin məhsul əlavə edə bilər!');
+      showToast('error', 'İcazə yoxdur: Yalnız Admin məhsul əlavə edə bilər!');
       return;
     }
     const product: Product = {
@@ -704,7 +854,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin məhsul məlumatlarını redaktə edə bilər!');
+      showToast('error', 'İcazə yoxdur: Yalnız Admin məhsul məlumatlarını redaktə edə bilər!');
       return;
     }
     setProducts(prev => prev.map(p => (p.id === id ? { ...p, ...updates } : p)));
@@ -730,7 +880,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteProduct = (id: string) => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin məhsul silə bilər!');
+      showToast('error', 'İcazə yoxdur: Yalnız Admin məhsul silə bilər!');
       return;
     }
     const target = products.find(p => p.id === id);
@@ -762,7 +912,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deletePurchase = (id: string) => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin mal qəbulunu silə bilər!');
+      showToast('error', 'İcazə yoxdur: Yalnız Admin mal qəbulunu silə bilər!');
       return;
     }
     setPurchases(prev => prev.filter(p => p.id !== id));
@@ -784,17 +934,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [products, purchases, sales, settings.minStockThreshold]
   );
 
-  const syncDailyReportForDate = (date: string, additionalSale?: Sale) => {
+  const syncDailyReportForDate = (
+    date: string,
+    additionalSale?: Sale,
+    overrideDebts?: DebtRecord[]
+  ) => {
+    const activeDebts = overrideDebts || debts;
+    const allDebtPaymentsForDay = activeDebts.flatMap(d =>
+      (d.payments || []).filter(p => (p.paidAt || p.date || '').split('T')[0] === date)
+    );
+
     setDailyReports(prev => {
       const existing = prev.find(r => r.date === date);
       const allSalesForDay = [...sales, ...(additionalSale ? [additionalSale] : [])].filter(
-        s => s.date === date && s.isConfirmed && s.paymentType !== 'borc'
+        s => s.date === date && s.isConfirmed && s.paymentType !== 'borc' && s.paymentType !== 'balans'
       );
 
-      const cash = allSalesForDay.filter(s => s.paymentType === 'naqd').reduce((sum, s) => sum + s.totalAmount, 0);
-      const card = allSalesForDay.filter(s => s.paymentType === 'kart').reduce((sum, s) => sum + s.totalAmount, 0);
-      const pos = allSalesForDay.filter(s => s.paymentType === 'pos').reduce((sum, s) => sum + s.totalAmount, 0);
-      const total = cash + card + pos;
+      let cash = allSalesForDay.filter(s => s.paymentType === 'naqd').reduce((sum, s) => sum + s.totalAmount, 0);
+      let card = allSalesForDay.filter(s => s.paymentType === 'kart').reduce((sum, s) => sum + s.totalAmount, 0);
+      let pos = allSalesForDay.filter(s => s.paymentType === 'pos').reduce((sum, s) => sum + s.totalAmount, 0);
+
+      for (const p of allDebtPaymentsForDay) {
+        const amt = Number(p.amount) || 0;
+        const m = (p.paymentMethod || 'naqd').toLowerCase();
+        if (m === 'kart') card += amt;
+        else if (m === 'pos' || m === 'kocurme') pos += amt;
+        else cash += amt;
+      }
+
+      cash = Math.round(cash * 100) / 100;
+      card = Math.round(card * 100) / 100;
+      pos = Math.round(pos * 100) / 100;
+      const total = Math.round((cash + card + pos) * 100) / 100;
 
       if (existing) {
         if (!existing.isManuallyAdjusted) {
@@ -940,7 +1111,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteCustomerAccount = (customerId: string) => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin müştəri hesabını silə bilər!');
+      showToast('error', 'İcazə yoxdur: Yalnız Admin müştəri hesabını silə bilər!');
       return;
     }
     const target = customerAccounts.find(c => c.id === customerId);
@@ -1154,7 +1325,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Yalnız Admin satışları silə bilər (İşçi Admin məlumatlarını silə bilməz)
   const deleteSale = (saleId: string) => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin satışları silə bilər!');
+      showToast('error', 'İcazə yoxdur: Yalnız Admin satışları silə bilər!');
       return;
     }
     const s = sales.find(x => x.id === saleId);
@@ -1190,43 +1361,181 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const payDebt = (debtId: string, amount: number, note?: string) => {
-    const cleanAmount = Number(amount) || 0;
-    if (cleanAmount <= 0) return;
+  const acceptDebtPayment = async (
+    params: AcceptDebtPaymentParams
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cleanAmount = Math.round((Number(params.amount) || 0) * 100) / 100;
+    const targetDebt = debts.find(d => d.id === params.debtId);
 
-    setDebts(prev =>
-      prev.map(d => {
-        if (d.id === debtId) {
-          const newPaid = Math.min(d.totalAmount, d.paidAmount + cleanAmount);
-          const newRemaining = Math.max(0, d.totalAmount - newPaid);
-          const status = newRemaining === 0 ? 'odanilib' : 'borcdadir';
-          const newPayment = {
-            id: `pay-${Date.now()}`,
-            date: getTodayISODate(),
-            amount: cleanAmount,
-            note: note || 'Ödəniş',
-          };
-          const updated: DebtRecord = {
-            ...d,
-            paidAmount: newPaid,
-            remainingAmount: newRemaining,
-            status,
-            payments: [newPayment, ...d.payments],
-            updatedAt: new Date().toISOString(),
-          };
+    if (!targetDebt) {
+      return { success: false, error: 'Borc qeydi tapılmadı.' };
+    }
+    if (cleanAmount <= 0) {
+      return { success: false, error: 'Ödəniş məbləği sıfırdan böyük olmalıdır.' };
+    }
+    if (cleanAmount > Math.round(targetDebt.remainingAmount * 100) / 100 + 0.001) {
+      return {
+        success: false,
+        error: `Ödəniş qalıq borcdan (${targetDebt.remainingAmount.toFixed(2)} ₼) çox ola bilməz.`,
+      };
+    }
 
-          const supabase = getSupabaseClient();
-          if (supabase) {
-            safeDbExec(supabase.from('debts').update(mapDebtToDB(updated)).eq('id', debtId));
-          }
+    const paidDate = (params.date || getTodayISODate()).split('T')[0];
+    const receiver = (params.receivedBy || currentUser?.username || 'isci').trim();
+    const method: DebtPaymentMethod = params.paymentMethod || 'naqd';
+    const paymentId = `pay-${Date.now()}`;
+    const nowIso = new Date().toISOString();
 
-          return updated;
-        }
-        return d;
-      })
+    const newPayment: DebtPayment = {
+      id: paymentId,
+      debtId: targetDebt.id,
+      date: paidDate,
+      paidAt: paidDate,
+      amount: cleanAmount,
+      paymentMethod: method,
+      receivedBy: receiver,
+      note: params.note?.trim() || 'Yerindəcə borc ödənişi',
+      createdAt: nowIso,
+    };
+
+    const newPaid = Math.min(
+      targetDebt.totalAmount,
+      Math.round((targetDebt.paidAmount + cleanAmount) * 100) / 100
     );
+    const newRemaining = Math.max(0, Math.round((targetDebt.totalAmount - newPaid) * 100) / 100);
+    const newStatus: DebtRecord['status'] =
+      newRemaining <= 0 ? 'odanilib' : newPaid > 0 ? 'qismen' : 'borcdadir';
+
+    const updatedDebt: DebtRecord = {
+      ...targetDebt,
+      paidAmount: newPaid,
+      remainingAmount: newRemaining,
+      status: newStatus,
+      payments: [newPayment, ...(targetDebt.payments || [])],
+      updatedAt: nowIso,
+    };
+
+    const nextDebts = debts.map(d => (d.id === targetDebt.id ? updatedDebt : d));
+    setDebts(nextDebts);
+    syncDailyReportForDate(paidDate, undefined, nextDebts);
+
     playAlertSound('success');
-    addAuditLog('Borc Ödənildi', `Borc ID: ${debtId}, Ödənilən: ${cleanAmount} AZN.`);
+    addAuditLog(
+      'Borc Ödənişi Qəbul Edildi',
+      `${targetDebt.debtorName}: +${cleanAmount.toFixed(2)} AZN (${method.toUpperCase()}) · Məsul: ${receiver}`
+    );
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const rpcRes = await supabase.rpc('accept_debt_payment', {
+          p_debt_id: targetDebt.id,
+          p_amount: cleanAmount,
+          p_payment_method: method,
+          p_received_by: receiver,
+          p_paid_at: paidDate,
+          p_note: newPayment.note || null,
+          p_payment_id: paymentId,
+        });
+        if (rpcRes.error) {
+          // Fallback to direct table updates if RPC is not yet deployed
+          await Promise.all([
+            supabase.from('debt_payments').insert(mapDebtPaymentToDB({ ...newPayment, debtId: targetDebt.id })),
+            supabase.from('debts').update(mapDebtToDB(updatedDebt)).eq('id', targetDebt.id),
+          ]);
+        }
+      } catch (err) {
+        console.warn('acceptDebtPayment supabase sync warning:', err);
+      }
+    }
+
+    showToast(
+      'success',
+      `${targetDebt.debtorName} üçün ${cleanAmount.toFixed(2)} ₼ borc ödənişi qəbul edildi.`
+    );
+    return { success: true };
+  };
+
+  const payDebt = (debtId: string, amount: number, note?: string) => {
+    void acceptDebtPayment({
+      debtId,
+      amount,
+      paymentMethod: 'naqd',
+      receivedBy: currentUser?.username || 'admin',
+      date: getTodayISODate(),
+      note,
+    });
+  };
+
+  const deleteDebtPayment = async (
+    debtId: string,
+    paymentId: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (currentUser?.role !== 'admin') {
+      return { success: false, error: 'Yalnız Admin borc ödənişini silə bilər.' };
+    }
+
+    const targetDebt = debts.find(d => d.id === debtId);
+    if (!targetDebt) {
+      return { success: false, error: 'Borc qeydi tapılmadı.' };
+    }
+
+    const targetPayment = targetDebt.payments.find(p => p.id === paymentId);
+    if (!targetPayment) {
+      return { success: false, error: 'Ödəniş qeydi tapılmadı.' };
+    }
+
+    const remainingPayments = targetDebt.payments.filter(p => p.id !== paymentId);
+    const recalculatedPaid = Math.min(
+      targetDebt.totalAmount,
+      Math.round(remainingPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100
+    );
+    const recalculatedRemaining = Math.max(
+      0,
+      Math.round((targetDebt.totalAmount - recalculatedPaid) * 100) / 100
+    );
+    const recalculatedStatus: DebtRecord['status'] =
+      recalculatedRemaining <= 0 ? 'odanilib' : recalculatedPaid > 0 ? 'qismen' : 'borcdadir';
+
+    const updatedDebt: DebtRecord = {
+      ...targetDebt,
+      paidAmount: recalculatedPaid,
+      remainingAmount: recalculatedRemaining,
+      status: recalculatedStatus,
+      payments: remainingPayments,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const nextDebts = debts.map(d => (d.id === debtId ? updatedDebt : d));
+    setDebts(nextDebts);
+    const paidDate = (targetPayment.paidAt || targetPayment.date || getTodayISODate()).split('T')[0];
+    syncDailyReportForDate(paidDate, undefined, nextDebts);
+
+    addAuditLog(
+      'Borc Ödənişi Silindi',
+      `${targetDebt.debtorName}: -${Number(targetPayment.amount).toFixed(2)} AZN ödəniş ləğv edildi.`
+    );
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const rpcRes = await supabase.rpc('delete_debt_payment', {
+          p_payment_id: paymentId,
+          p_actor_username: currentUser.username,
+        });
+        if (rpcRes.error) {
+          await Promise.all([
+            supabase.from('debt_payments').delete().eq('id', paymentId),
+            supabase.from('debts').update(mapDebtToDB(updatedDebt)).eq('id', debtId),
+          ]);
+        }
+      } catch (err) {
+        console.warn('deleteDebtPayment supabase sync warning:', err);
+      }
+    }
+
+    showToast('info', 'Borc ödənişi qeydi silindi.');
+    return { success: true };
   };
 
   const saveDailyReport = (report: {
@@ -1236,10 +1545,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     posAmount: number;
     notes?: string;
   }) => {
-    const total = Number(report.cashAmount) + Number(report.cardAmount) + Number(report.posAmount);
-    const daySales = sales.filter(s => s.date === report.date && s.isConfirmed && s.paymentType !== 'borc');
+    const total = Math.round((Number(report.cashAmount) + Number(report.cardAmount) + Number(report.posAmount)) * 100) / 100;
+    const daySales = sales.filter(
+      s => s.date === report.date && s.isConfirmed && s.paymentType !== 'borc' && s.paymentType !== 'balans'
+    );
     const salesTotal = daySales.reduce((sum, s) => sum + s.totalAmount, 0);
-    const difference = Math.round((total - salesTotal) * 100) / 100;
+    const debtCollectedTotal = debts
+      .flatMap(d => d.payments || [])
+      .filter(p => (p.paidAt || p.date || '').split('T')[0] === report.date)
+      .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+
+    const expectedTotal = salesTotal + debtCollectedTotal;
+    const difference = Math.round((total - expectedTotal) * 100) / 100;
 
     const fullReport: DailyReport = {
       ...report,
@@ -1261,17 +1578,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return [fullReport, ...prev];
     });
 
-    addAuditLog('Gündəlik Hesabat Saxlanıldı', `${report.date}: Cəm ${total} AZN.`);
+    addAuditLog('Gündəlik Hesabat Saxlanıldı', `${report.date}: Cəm ${total.toFixed(2)} AZN.`);
 
     const supabase = getSupabaseClient();
     if (supabase) {
       safeDbExec(supabase.from('daily_reports').upsert(mapDailyReportToDB(fullReport)));
     }
+    showToast('success', `${report.date} tarixli günlük kassa hesabatı saxlanıldı.`);
   };
 
   const addExpense = (newExp: Omit<Expense, 'id' | 'createdAt' | 'createdBy'>) => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin xərc daxil edə bilər!');
+      showToast('error', 'İcazə yoxdur: Yalnız Admin xərc daxil edə bilər!');
       return;
     }
     const expense: Expense = {
@@ -1291,7 +1609,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const deleteExpense = (id: string) => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin xərcləri silə bilər!');
+      showToast('error', 'İcazə yoxdur: Yalnız Admin xərcləri silə bilər!');
       return;
     }
     setExpenses(prev => prev.filter(e => e.id !== id));
@@ -1303,31 +1621,66 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const updateSettings = (newSettings: Partial<AppSettings>) => {
+  const updateSettings = async (
+    newSettings: Partial<AppSettings>
+  ): Promise<{ success: boolean; error?: string }> => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin parametrləri yeniləyə bilər!');
-      return;
+      const msg = 'İcazə yoxdur: Yalnız Admin parametrləri yeniləyə bilər!';
+      showToast('error', msg);
+      return { success: false, error: msg };
     }
-    const updated = { ...settings, ...newSettings };
+    const updated: AppSettings = { ...settings, ...newSettings };
     setSettings(updated);
-    addAuditLog('Ayarlar Yeniləndi', 'Sistem parametrləri yeniləndi.');
+    addAuditLog('Ayarlar Yeniləndi', 'Sistem və dizayn parametrləri yeniləndi.');
 
     const supabase = getSupabaseClient();
     if (supabase) {
-      safeDbExec(supabase.from('app_settings').upsert({
-        id: 'global',
-        min_stock_threshold: updated.minStockThreshold,
-        auto_confirm_sales: updated.autoConfirmSales,
-        bar_name: updated.barName,
-        enable_push_notifications: updated.enablePushNotifications,
-      }));
+      try {
+        const kvEntries = serializeSettingsToKV(updated);
+        // Persist via security-definer RPC first, fallback to direct KV upsert or legacy single-row
+        const rpcResults = await Promise.all(
+          kvEntries.map(entry =>
+            supabase.rpc('upsert_app_setting', {
+              p_key: entry.key,
+              p_value: entry.value,
+              p_actor_username: currentUser.username,
+            })
+          )
+        );
+
+        const hasRpcError = rpcResults.some(r => r.error);
+        if (hasRpcError) {
+          const kvUpsert = await supabase
+            .from('app_settings')
+            .upsert(
+              kvEntries.map(e => ({ ...e, updated_at: new Date().toISOString() })),
+              { onConflict: 'key' }
+            );
+          if (kvUpsert.error) {
+            await supabase.from('app_settings').upsert({
+              id: 'global',
+              min_stock_threshold: updated.minStockThreshold,
+              auto_confirm_sales: updated.autoConfirmSales,
+              bar_name: updated.barName,
+              enable_push_notifications: updated.enablePushNotifications,
+              logo_url: updated.logoUrl || null,
+            });
+          }
+        }
+      } catch (err: unknown) {
+        const errMsg = err instanceof Error ? err.message : 'Parametrlər buluda yazılarkən xəta baş verdi.';
+        console.warn('updateSettings supabase warning:', err);
+        return { success: false, error: errMsg };
+      }
     }
+
+    return { success: true };
   };
 
   // Zero-out all transaction data while keeping products, users, and settings intact
   const clearAllTransactions = async () => {
     if (currentUser?.role !== 'admin') {
-      alert('İcazə yoxdur: Yalnız Admin əməliyyatları sıfırlaya bilər!');
+      showToast('error', 'İcazə yoxdur: Yalnız Admin əməliyyatları sıfırlaya bilər!');
       return;
     }
     setSales([]);
@@ -1438,6 +1791,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         debts,
         addDebt,
         payDebt,
+        acceptDebtPayment,
+        deleteDebtPayment,
         customerAccounts,
         depositToCustomer,
         chargeCustomerBalance,
@@ -1448,6 +1803,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         addExpense,
         deleteExpense,
         settings,
+        settingsLoading,
         updateSettings,
         auditLogs,
         resetToSampleData,
@@ -1464,6 +1820,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         supabaseStatus,
         syncAllLocalDataToSupabase,
         reloadFromSupabase,
+        toast,
+        showToast,
+        dismissToast,
       }}
     >
       {children}

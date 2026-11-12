@@ -380,3 +380,86 @@ export function mapDBToCustomerAccount(row: any): CustomerAccount {
   };
 }
 
+export function mapDBToDebtPayment(row: any) {
+  return {
+    id: row.id,
+    debtId: row.debt_id,
+    date: row.paid_at,
+    paidAt: row.paid_at,
+    amount: Number(row.amount) || 0,
+    paymentMethod: (row.payment_method || 'naqd') as 'naqd' | 'kart' | 'pos' | 'kocurme',
+    receivedBy: row.received_by || 'admin',
+    note: row.note || undefined,
+    createdAt: row.created_at || new Date().toISOString(),
+  };
+}
+
+export function mapDebtPaymentToDB(p: {
+  id: string;
+  debtId: string;
+  amount: number;
+  paymentMethod?: string;
+  receivedBy?: string;
+  paidAt?: string;
+  date?: string;
+  note?: string;
+  createdAt?: string;
+}) {
+  return {
+    id: p.id,
+    debt_id: p.debtId,
+    amount: Number(p.amount) || 0,
+    payment_method: (p.paymentMethod || 'naqd').toLowerCase(),
+    received_by: p.receivedBy || 'admin',
+    paid_at: p.paidAt || p.date || new Date().toISOString().slice(0, 10),
+    note: p.note || null,
+    created_at: p.createdAt || new Date().toISOString(),
+  };
+}
+
+export function applyAppSettingsRows(
+  rows: { key: string; value: string }[],
+  fallback: AppSettings
+): AppSettings {
+  const map: Record<string, string> = {};
+  for (const r of rows) {
+    if (r && r.key) map[r.key] = r.value ?? '';
+  }
+
+  const sizeRaw = map.logo_size;
+  const logoSize: AppSettings['logoSize'] =
+    sizeRaw === 'sm' || sizeRaw === 'md' || sizeRaw === 'lg' ? sizeRaw : fallback.logoSize;
+
+  return {
+    barName: map.app_name !== undefined && map.app_name !== '' ? map.app_name : fallback.barName,
+    logoUrl: map.logo_url !== undefined ? map.logo_url || undefined : fallback.logoUrl,
+    primaryColor: map.primary_color || fallback.primaryColor || '#dc2626',
+    logoSize,
+    minStockThreshold:
+      map.min_stock_threshold !== undefined
+        ? Number(map.min_stock_threshold) || fallback.minStockThreshold
+        : fallback.minStockThreshold,
+    autoConfirmSales:
+      map.auto_confirm_sales !== undefined
+        ? map.auto_confirm_sales === 'true'
+        : fallback.autoConfirmSales,
+    enablePushNotifications:
+      map.enable_push_notifications !== undefined
+        ? map.enable_push_notifications === 'true'
+        : fallback.enablePushNotifications,
+  };
+}
+
+export function serializeSettingsToKV(s: AppSettings): { key: string; value: string }[] {
+  return [
+    { key: 'app_name', value: s.barName || 'Zal Barı' },
+    { key: 'logo_url', value: s.logoUrl || '' },
+    { key: 'primary_color', value: s.primaryColor || '#dc2626' },
+    { key: 'logo_size', value: s.logoSize || 'md' },
+    { key: 'min_stock_threshold', value: String(s.minStockThreshold ?? 5) },
+    { key: 'auto_confirm_sales', value: String(Boolean(s.autoConfirmSales)) },
+    { key: 'enable_push_notifications', value: String(Boolean(s.enablePushNotifications)) },
+  ];
+}
+
+

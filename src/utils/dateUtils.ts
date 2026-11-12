@@ -10,6 +10,15 @@ export function getTodayISODate(): string {
   return `${year}-${month}-${day}`;
 }
 
+export function getYesterdayISODate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export function getCurrentTimeHHMM(): string {
   const now = new Date();
   const hours = String(now.getHours()).padStart(2, '0');
@@ -47,12 +56,18 @@ export function formatDateTimeAZ(isoString?: string | null): string {
 }
 
 /**
- * Formats number as AZN currency with 2 decimals
+ * Formats number in unified currency style: "1 250,00 ₼" (0 -> "0,00 ₼")
  */
 export function formatAZN(amount: number | null | undefined): string {
   const val = Number(amount) || 0;
-  return `${val.toFixed(2)} AZN`;
+  const isNeg = val < 0;
+  const absFixed = Math.abs(val).toFixed(2);
+  const [intPart, decPart] = absFixed.split('.');
+  const groupedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return `${isNeg ? '-' : ''}${groupedInt},${decPart} ₼`;
 }
+
+export const formatMoney = formatAZN;
 
 /**
  * Returns current month key as YYYY-MM

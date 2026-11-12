@@ -4,10 +4,8 @@ import {
   CheckCircle2,
   AlertTriangle,
   RefreshCw,
-  Copy,
   Check,
   X,
-  ExternalLink,
   ShieldCheck,
   Smartphone,
   Globe,
@@ -31,7 +29,6 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, on
     isSupabaseConnected,
     supabaseStatus,
     syncAllLocalDataToSupabase,
-    reloadFromSupabase,
     currentUser,
   } = useApp();
 
@@ -41,7 +38,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, on
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
-  const [copiedSql, setCopiedSql] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const isAdmin = currentUser?.role === 'admin';
 
   useEffect(() => {
@@ -51,6 +48,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, on
       setAnonKey(cfg.anonKey);
       setTestResult(null);
       setSyncMessage(null);
+      setConfirmClear(false);
     }
   }, [isOpen]);
 
@@ -76,12 +74,10 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, on
   };
 
   const handleClear = () => {
-    if (confirm('Supabase parametrlərini silib lokal rejimə qayıtmaq istəyirsiniz?')) {
-      clearSupabaseConfig();
-      setUrl('');
-      setAnonKey('');
-      window.location.reload();
-    }
+    clearSupabaseConfig();
+    setUrl('');
+    setAnonKey('');
+    window.location.reload();
   };
 
   const handleSyncLocalToCloud = async () => {
@@ -94,31 +90,23 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, on
       } else {
         setSyncMessage(`Xəta: ${res.error || 'Yükləmə uğursuz oldu'}`);
       }
-    } catch (e: any) {
-      setSyncMessage(`Xəta: ${e?.message || 'Gözlənilməz xəta'}`);
+    } catch (e: unknown) {
+      setSyncMessage(`Xəta: ${e instanceof Error ? e.message : 'Gözlənilməz xəta'}`);
     } finally {
       setSyncing(false);
     }
   };
 
-  const handleCopySql = () => {
-    const sqlText = `-- Supabase SQL skripti layihənin kök qovluğundakı "supabase_schema.sql" faylındadır.
--- Onu Supabase Dashboard -> SQL Editor pəncərəsində işə salın.`;
-    navigator.clipboard.writeText(sqlText);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 2000);
-  };
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div
-        className="w-full max-w-2xl rounded-3xl bg-zinc-950 border border-zinc-800 p-6 shadow-2xl text-zinc-100 relative max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-2xl rounded-3xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100 relative max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Close Button */}
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 p-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white transition"
+          className="absolute top-4 right-4 p-2 rounded-xl bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition"
           aria-label="Bağla"
         >
           <X className="w-5 h-5" />
@@ -126,62 +114,62 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, on
 
         {/* Modal Header */}
         <div className="flex items-center gap-4 mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-lg shadow-emerald-600/30 flex-shrink-0">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shadow-lg flex-shrink-0">
             <Database className="w-6 h-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h3 className="text-lg font-black text-white tracking-tight">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-lg font-black text-zinc-900 dark:text-white tracking-tight">
                 Supabase Vahid Baza & Real-vaxt Sinxronizasiya
               </h3>
               <span
                 className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
                   isSupabaseConnected
-                    ? 'bg-emerald-950/80 text-emerald-400 border border-emerald-500/40'
-                    : 'bg-amber-950/80 text-amber-400 border border-amber-500/40'
+                    ? 'bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/40'
+                    : 'bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-500/40'
                 }`}
               >
-                <Radio className={`w-3 h-3 ${isSupabaseConnected ? 'animate-pulse text-emerald-400' : ''}`} />
+                <Radio className="w-3 h-3" />
                 {isSupabaseConnected ? 'Canlı Qoşulub' : 'Quraşdırma Gözləyir'}
               </span>
             </div>
-            <p className="text-xs text-zinc-400 mt-0.5">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
               Admin və işçi telefonlarında eyni anda satış, su qalığı və hesabatların dərhal yenilənməsi
             </p>
           </div>
         </div>
 
         {/* Realtime Status Overview */}
-        <div className="p-4 rounded-2xl bg-zinc-900/80 border border-zinc-800/80 mb-5 space-y-2 text-xs">
+        <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800/80 mb-5 space-y-2 text-xs">
           <div className="flex items-center justify-between">
-            <span className="text-zinc-400">Real-vaxt Vəziyyəti:</span>
-            <span className="font-bold text-white flex items-center gap-1.5">
+            <span className="text-zinc-500 dark:text-zinc-400">Real-vaxt Vəziyyəti:</span>
+            <span className="font-bold text-zinc-900 dark:text-white flex items-center gap-1.5">
               <span
                 className={`w-2 h-2 rounded-full ${
-                  isSupabaseConnected ? 'bg-emerald-500 animate-ping' : 'bg-amber-500'
+                  isSupabaseConnected ? 'bg-emerald-500' : 'bg-amber-500'
                 }`}
               />
               {supabaseStatus}
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-zinc-400">Çox-cihazlı Dəstək:</span>
-            <span className="font-semibold text-emerald-400 flex items-center gap-1">
+            <span className="text-zinc-500 dark:text-zinc-400">Çox-cihazlı Dəstək:</span>
+            <span className="font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
               <Smartphone className="w-3.5 h-3.5" /> iPhone, Android və Kompüter eyni anda sinxronlaşır
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-zinc-400">İcazələr:</span>
-            <span className="font-semibold text-zinc-300 flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5 text-blue-400" /> İşçi yalnız satış daxil edə bilər, admin məlumatlarını silə bilməz
+            <span className="text-zinc-500 dark:text-zinc-400">İcazələr:</span>
+            <span className="font-semibold text-zinc-700 dark:text-zinc-300 flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" /> İşçi yalnız satış daxil edə bilər, admin məlumatlarını silə bilməz
             </span>
           </div>
         </div>
 
-        {/* Connection Form (Visible or editable by Admin) */}
+        {/* Connection Form */}
         <div className="space-y-4 mb-6">
           <div>
-            <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
               Supabase Project URL
             </label>
             <input
@@ -190,7 +178,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, on
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://your-project.supabase.co"
               disabled={!isAdmin}
-              className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-700 bg-zinc-900 text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
+              className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-white font-mono placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
             />
             <p className="text-[11px] text-zinc-500 mt-1">
               Supabase Dashboard &gt; Project Settings &gt; API &gt; Project URL
@@ -198,7 +186,7 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, on
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">
+            <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
               Supabase Anon / Public API Key
             </label>
             <input
@@ -207,39 +195,37 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, on
               onChange={(e) => setAnonKey(e.target.value)}
               placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
               disabled={!isAdmin}
-              className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-700 bg-zinc-900 text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
+              className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-zinc-900 dark:text-white font-mono placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60"
             />
             <p className="text-[11px] text-zinc-500 mt-1">
               Supabase Dashboard &gt; Project Settings &gt; API &gt; anon public key
             </p>
           </div>
 
-          {/* Test connection result message */}
           {testResult && (
             <div
               className={`p-3.5 rounded-xl text-xs flex items-start gap-2.5 border ${
                 testResult.success
-                  ? 'bg-emerald-950/60 border-emerald-800 text-emerald-300'
-                  : 'bg-red-950/60 border-red-800 text-red-300'
+                  ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300'
+                  : 'bg-red-50 dark:bg-red-950/60 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300'
               }`}
             >
               {testResult.success ? (
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
               ) : (
-                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
               )}
               <div className="leading-relaxed">{testResult.message}</div>
             </div>
           )}
 
-          {/* Action buttons */}
           {isAdmin ? (
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <button
                 type="button"
                 onClick={handleTest}
                 disabled={testing || !url.trim() || !anonKey.trim()}
-                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-zinc-700"
+                className="px-4 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50 text-zinc-900 dark:text-white font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-zinc-300 dark:border-zinc-700"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${testing ? 'animate-spin' : ''}`} />
                 <span>{testing ? 'Yoxlanılır...' : 'Bağlantını Yoxla'}</span>
@@ -249,65 +235,83 @@ export const SupabaseSyncModal: React.FC<SupabaseSyncModalProps> = ({ isOpen, on
                 type="button"
                 onClick={handleSave}
                 disabled={!url.trim() || !anonKey.trim()}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition shadow-md shadow-emerald-600/30 flex items-center gap-1.5"
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition shadow-md flex items-center gap-1.5"
               >
                 <Check className="w-4 h-4" />
                 <span>Yadda Saxla və Qoşul</span>
               </button>
 
               {(getSupabaseConfig().url || getSupabaseConfig().anonKey) && (
-                <button
-                  type="button"
-                  onClick={handleClear}
-                  className="px-3 py-2 text-zinc-400 hover:text-red-400 text-xs font-semibold rounded-xl transition ml-auto"
-                >
-                  Tənzimləməni Sil
-                </button>
+                confirmClear ? (
+                  <div className="ml-auto flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleClear}
+                      className="px-3 py-1.5 bg-red-600 text-white text-xs font-bold rounded-lg"
+                    >
+                      Sil və Lokal Rejimə Keç
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmClear(false)}
+                      className="px-2.5 py-1.5 bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-semibold rounded-lg"
+                    >
+                      Ləğv et
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmClear(true)}
+                    className="px-3 py-2 text-zinc-500 dark:text-zinc-400 hover:text-red-600 dark:hover:text-red-400 text-xs font-semibold rounded-xl transition ml-auto"
+                  >
+                    Tənzimləməni Sil
+                  </button>
+                )
               )}
             </div>
           ) : (
-            <p className="text-xs text-zinc-400 italic">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 italic">
               Supabase bağlantı parametrlərini yalnız Admin redaktə edə bilər.
             </p>
           )}
         </div>
 
         {/* Sync & Setup Guide for Supabase */}
-        <div className="border-t border-zinc-800 pt-5 space-y-4">
-          <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-300 flex items-center gap-2">
-            <Globe className="w-4 h-4 text-emerald-400" />
-            <span>Quraşdırma və SQL Skripti (1 Dəqiqəlik)</span>
+        <div className="border-t border-zinc-200 dark:border-zinc-800 pt-5 space-y-4">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-700 dark:text-zinc-300 flex items-center gap-2">
+            <Globe className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+            <span>Quraşdırma və SQL Skripti</span>
           </h4>
 
-          <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 space-y-2 text-xs text-zinc-300">
-            <ol className="list-decimal list-inside space-y-1.5 text-zinc-300">
+          <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-2 text-xs text-zinc-700 dark:text-zinc-300">
+            <ol className="list-decimal list-inside space-y-1.5">
               <li>
-                <strong>supabase.com</strong> saytında pulsuz layihə yaradın.
+                <strong>supabase.com</strong> saytında layihə yaradın və ya mövcud layihəni açın.
               </li>
               <li>
                 Sol menyudan <strong>SQL Editor</strong> bölməsinə keçin.
               </li>
               <li>
-                Layihənizdəki <code>supabase_schema.sql</code> faylının məzmununu ora yapışdırıb <strong>Run</strong> düyməsinə basın.
+                <code>supabase_schema.sql</code> və ya <code>supabase/migrations/20261112_dynamic_branding_reports_debts.sql</code> skriptini çalışdırın (<strong>Run</strong>).
               </li>
               <li>
-                <strong>Project Settings &gt; API</strong> bölməsindən <strong>URL</strong> və <strong>anon key</strong>-i yuxarıdakı xanalara yazın (və ya Render-də <code>VITE_SUPABASE_URL</code> olaraq təyin edin).
+                <strong>Project Settings &gt; API</strong> bölməsindən <strong>URL</strong> və <strong>anon key</strong>-i yuxarıdakı xanalara yazın.
               </li>
             </ol>
           </div>
 
-          {/* Sync Local Data to Supabase Button */}
           {isSupabaseConnected && isAdmin && (
-            <div className="p-4 rounded-2xl bg-emerald-950/30 border border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-500/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-bold text-emerald-300">
+                <p className="text-xs font-bold text-emerald-800 dark:text-emerald-300">
                   Lokal Məlumatları Supabase-ə Göçür
                 </p>
-                <p className="text-[11px] text-zinc-400">
+                <p className="text-[11px] text-zinc-600 dark:text-zinc-400">
                   Hazırda brauzerdə olan məhsulları, ayarları və istifadəçiləri Supabase bazasına ötürün.
                 </p>
                 {syncMessage && (
-                  <p className="text-xs font-semibold text-emerald-400 mt-1.5">
+                  <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400 mt-1.5">
                     {syncMessage}
                   </p>
                 )}

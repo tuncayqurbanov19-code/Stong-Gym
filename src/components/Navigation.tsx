@@ -10,15 +10,14 @@ import {
   LogOut,
   Sun,
   Moon,
-  Dumbbell,
   FileSpreadsheet,
-  Bell,
   BellRing,
   Database,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { PWAInstallButton } from './PWAInstallButton';
 import { SupabaseSyncModal } from './SupabaseSyncModal';
+import { Logo } from './Logo';
 
 export type NavTab =
   | 'dashboard'
@@ -48,6 +47,7 @@ export const Sidebar: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) 
   } = useApp();
   const isAdmin = currentUser?.role === 'admin';
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
+  const primaryColor = settings.primaryColor || '#dc2626';
 
   const navItems: { id: NavTab; label: string; icon: React.ReactNode; adminOnly?: boolean }[] = [
     {
@@ -99,22 +99,10 @@ export const Sidebar: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) 
   const visibleItems = navItems.filter(item => !item.adminOnly || isAdmin);
 
   return (
-    <aside className="hidden lg:flex flex-col w-64 bg-zinc-950 text-zinc-100 border-r border-zinc-800/80 shrink-0 select-none">
+    <aside className="hidden lg:flex flex-col w-64 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 border-r border-zinc-200 dark:border-zinc-800/80 shrink-0 select-none transition-colors">
       {/* Brand Header */}
-      <div className="p-5 border-b border-zinc-800/80 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-red-600 to-rose-600 text-white flex items-center justify-center shadow-lg shadow-red-600/30 font-bold">
-            <Dumbbell className="w-6 h-6 stroke-[2.2]" />
-          </div>
-          <div>
-            <h1 className="text-base font-black text-white tracking-tight leading-tight">
-              {settings.barName}
-            </h1>
-            <p className="text-[11px] font-medium text-red-500">
-              İdarəetmə & POS
-            </p>
-          </div>
-        </div>
+      <div className="p-5 border-b border-zinc-200 dark:border-zinc-800/80 flex items-center justify-between">
+        <Logo variant="lockup" subtitle="İdarəetmə & POS" />
       </div>
 
       {/* Push Notification Quick Status Bar */}
@@ -124,8 +112,8 @@ export const Sidebar: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) 
             onClick={() => requestPushPermission()}
             className={`w-full py-1.5 px-3 rounded-xl text-[11px] font-semibold flex items-center justify-between transition-colors border ${
               notificationPermission === 'granted'
-                ? 'bg-zinc-900 border-emerald-900/60 text-emerald-400'
-                : 'bg-red-950/40 border-red-800 text-red-300 hover:bg-red-900/50'
+                ? 'bg-emerald-50 dark:bg-zinc-900 border-emerald-200 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-400'
+                : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/50'
             }`}
             title="Qalıq minimum həddə çatanda brauzer bildirişi"
           >
@@ -140,23 +128,22 @@ export const Sidebar: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) 
         </div>
       )}
 
-      {/* Supabase Realtime Cloud Sync Bar */}
+      {/* Supabase Cloud Sync Bar */}
       <div className="px-3 pt-2">
         <button
           onClick={() => setIsSupabaseModalOpen(true)}
           className={`w-full py-1.5 px-3 rounded-xl text-[11px] font-semibold flex items-center justify-between transition-colors border ${
             isSupabaseConnected
-              ? 'bg-zinc-900 border-emerald-900/60 text-emerald-400'
-              : 'bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:text-white'
+              ? 'bg-emerald-50 dark:bg-zinc-900 border-emerald-200 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-400'
+              : 'bg-zinc-100 dark:bg-zinc-900/60 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
           }`}
           title="Supabase Vahid Baza və Real-vaxt Sinxronizasiya Parametrləri"
         >
           <div className="flex items-center gap-1.5">
-            <Database className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+            <Database className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
             <span>Supabase:</span>
           </div>
-          <span className="font-bold flex items-center gap-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConnected ? 'bg-emerald-400 animate-ping' : 'bg-zinc-500'}`} />
+          <span className="font-bold">
             {isSupabaseConnected ? 'Canlı' : 'Quraşdır'}
           </span>
         </button>
@@ -170,13 +157,14 @@ export const Sidebar: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) 
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
+              style={isActive ? { backgroundColor: primaryColor } : undefined}
               className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl font-medium text-sm transition-all text-left ${
                 isActive
-                  ? 'bg-red-600 text-white font-bold shadow-md shadow-red-600/30'
-                  : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
+                  ? 'text-white font-bold shadow-sm'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-900'
               }`}
             >
-              <span className={isActive ? 'text-white' : 'text-zinc-400'}>
+              <span className={isActive ? 'text-white' : 'text-zinc-500 dark:text-zinc-400'}>
                 {item.icon}
               </span>
               <span className="truncate">{item.label}</span>
@@ -186,22 +174,29 @@ export const Sidebar: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) 
       </nav>
 
       {/* Bottom User & Theme Strip */}
-      <div className="p-3 border-t border-zinc-800/80 space-y-2">
-        {/* PWA Home Screen button in sidebar */}
+      <div className="p-3 border-t border-zinc-200 dark:border-zinc-800/80 space-y-2">
         <PWAInstallButton variant="full" />
 
-        <div className="flex items-center justify-between px-3 py-2 bg-zinc-900/80 rounded-xl border border-zinc-800/60">
+        <div className="flex items-center justify-between px-3 py-2 bg-zinc-100 dark:bg-zinc-900/80 rounded-xl border border-zinc-200 dark:border-zinc-800/60">
           <div className="flex items-center gap-2.5 overflow-hidden">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold ${
-              isAdmin ? 'bg-red-950 text-red-400 border border-red-800/60' : 'bg-zinc-800 text-zinc-300'
-            }`}>
+            <div
+              style={isAdmin ? { color: primaryColor, borderColor: `${primaryColor}55` } : undefined}
+              className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold shrink-0 ${
+                isAdmin
+                  ? 'bg-red-50 dark:bg-red-950/60 border'
+                  : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+              }`}
+            >
               {currentUser?.name.charAt(0) || 'U'}
             </div>
             <div className="truncate">
-              <p className="text-xs font-bold text-white truncate">
+              <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">
                 {currentUser?.name}
               </p>
-              <p className="text-[10px] uppercase font-semibold tracking-wider text-red-400">
+              <p
+                style={isAdmin ? { color: primaryColor } : undefined}
+                className="text-[10px] uppercase font-semibold tracking-wider text-zinc-500 dark:text-zinc-400"
+              >
                 {isAdmin ? 'Admin' : 'İşçi'}
               </p>
             </div>
@@ -209,16 +204,16 @@ export const Sidebar: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) 
           <button
             onClick={toggleTheme}
             aria-label="Rejimi dəyiş"
-            className="p-1.5 text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+            className="p-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-colors"
             title={theme === 'dark' ? 'İşıqlı rejim' : 'Qaranlıq rejim'}
           >
-            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-zinc-400" />}
+            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-zinc-600" />}
           </button>
         </div>
 
         <button
           onClick={logout}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold text-red-400 hover:bg-red-950/40 rounded-xl transition-colors border border-transparent hover:border-red-900/50"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 rounded-xl transition-colors border border-transparent hover:border-red-200 dark:hover:border-red-900/50"
         >
           <LogOut className="w-4 h-4" />
           <span>Sistemdən Çıxış</span>
@@ -253,48 +248,47 @@ export const MobileHeader: React.FC<{
 
   return (
     <>
-      <header className="lg:hidden sticky top-0 z-30 bg-zinc-950/95 backdrop-blur-md border-b border-zinc-800/80 px-4 h-14 flex items-center justify-between text-white">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-lg bg-red-600 text-white flex items-center justify-center font-bold shadow-md shadow-red-600/30">
-            <Dumbbell className="w-4 h-4" />
-          </div>
-          <div>
-            <h2 className="text-sm font-bold text-white leading-tight">
+      <header className="lg:hidden sticky top-0 z-30 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800/80 px-4 h-14 flex items-center justify-between text-zinc-900 dark:text-white transition-colors">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <Logo variant="icon" sizeOverride="sm" />
+          <div className="min-w-0">
+            <h2 className="text-sm font-bold text-zinc-900 dark:text-white leading-tight truncate">
               {tabTitles[activeTab]}
             </h2>
-            <p className="text-[10px] text-zinc-400">
-              {settings.barName} · <span className="text-red-400 font-semibold">{isAdmin ? 'Admin' : 'İşçi'}</span>
+            <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">
+              {settings.barName} ·{' '}
+              <span style={{ color: settings.primaryColor || '#dc2626' }} className="font-semibold">
+                {isAdmin ? 'Admin' : 'İşçi'}
+              </span>
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          {/* Supabase status badge on mobile */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => setIsSupabaseModalOpen(true)}
             className={`p-1.5 rounded-lg border text-xs flex items-center gap-1 ${
               isSupabaseConnected
-                ? 'bg-zinc-900 border-emerald-900/60 text-emerald-400'
-                : 'bg-zinc-900 border-zinc-800 text-zinc-400'
+                ? 'bg-emerald-50 dark:bg-zinc-900 border-emerald-200 dark:border-emerald-900/60 text-emerald-700 dark:text-emerald-400'
+                : 'bg-zinc-100 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400'
             }`}
             title="Supabase Canlı Sinxronizasiya"
           >
             <Database className="w-3.5 h-3.5" />
-            <span className={`w-1.5 h-1.5 rounded-full ${isSupabaseConnected ? 'bg-emerald-400 animate-ping' : 'bg-zinc-600'}`} />
           </button>
 
           <PWAInstallButton variant="compact" />
           <button
             onClick={toggleTheme}
             aria-label="Rejim"
-            className="p-2 text-zinc-300 rounded-lg hover:bg-zinc-800"
+            className="p-2 text-zinc-600 dark:text-zinc-300 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
-            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-zinc-600" />}
           </button>
           <button
             onClick={logout}
             aria-label="Çıxış"
-            className="p-2 text-red-400 rounded-lg hover:bg-red-950/40"
+            className="p-2 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/40"
             title="Çıxış"
           >
             <LogOut className="w-4 h-4" />
@@ -311,8 +305,9 @@ export const MobileHeader: React.FC<{
 };
 
 export const BottomNav: React.FC<NavigationProps> = ({ activeTab, setActiveTab }) => {
-  const { currentUser } = useApp();
+  const { currentUser, settings } = useApp();
   const isAdmin = currentUser?.role === 'admin';
+  const primaryColor = settings.primaryColor || '#dc2626';
 
   const items = isAdmin
     ? [
@@ -330,7 +325,7 @@ export const BottomNav: React.FC<NavigationProps> = ({ activeTab, setActiveTab }
       ];
 
   return (
-    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800 pb-safe shadow-xl">
+    <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md border-t border-zinc-200 dark:border-zinc-800 pb-safe shadow-xl">
       <div className={`grid ${isAdmin ? 'grid-cols-5' : 'grid-cols-4'} h-14 items-center px-1`}>
         {items.map(item => {
           const isActive = activeTab === item.id;
@@ -338,10 +333,11 @@ export const BottomNav: React.FC<NavigationProps> = ({ activeTab, setActiveTab }
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
+              style={isActive ? { color: primaryColor } : undefined}
               className={`flex flex-col items-center justify-center py-1 transition-all ${
                 isActive
-                  ? 'text-red-500 font-bold scale-105'
-                  : 'text-zinc-400 hover:text-white'
+                  ? 'font-bold scale-105'
+                  : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
               }`}
             >
               <div>{item.icon}</div>

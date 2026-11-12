@@ -14,6 +14,8 @@ export const INITIAL_SETTINGS: AppSettings = {
   autoConfirmSales: true,
   barName: 'Zal Barı',
   enablePushNotifications: true,
+  primaryColor: '#dc2626',
+  logoSize: 'md',
 };
 
 export const INITIAL_USERS: User[] = [

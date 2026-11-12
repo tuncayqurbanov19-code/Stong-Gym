@@ -1,13 +1,10 @@
 import React, { useState } from 'react';
 import {
-  ArrowDownLeft,
   Plus,
-  Calendar,
   DollarSign,
   Package,
   Download,
   Trash2,
-  CheckCircle,
   Search,
   X,
 } from 'lucide-react';
@@ -16,8 +13,9 @@ import { formatAZN, formatDateAZ, getTodayISODate } from '../utils/dateUtils';
 import { exportPurchasesToCSV } from '../utils/exportUtils';
 
 export const PurchasesView: React.FC = () => {
-  const { products, purchases, addPurchase, deletePurchase, currentUser } = useApp();
+  const { products, purchases, addPurchase, deletePurchase, currentUser, settings, showToast } = useApp();
   const isAdmin = currentUser?.role === 'admin';
+  const primaryColor = settings.primaryColor || '#dc2626';
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState(products[0]?.id || '');
@@ -26,6 +24,7 @@ export const PurchasesView: React.FC = () => {
   const [date, setDate] = useState(getTodayISODate());
   const [note, setNote] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Summary by product
   const productSummary: Record<string, { quantity: number; amount: number; name: string }> = {};
@@ -44,7 +43,6 @@ export const PurchasesView: React.FC = () => {
   const totalPurchasedCount = purchases.reduce((sum, p) => sum + p.quantity, 0);
   const totalPaidSum = purchases.reduce((sum, p) => sum + p.paidAmount, 0);
 
-  // Auto-fill paid amount when product or quantity changes based on product's buyPrice
   const handleProductSelect = (pId: string) => {
     setSelectedProductId(pId);
     const prod = products.find(p => p.id === pId);
@@ -81,6 +79,7 @@ export const PurchasesView: React.FC = () => {
       note: note.trim() || undefined,
     });
 
+    showToast('success', `"${prod.name}" (+${qty} ədəd) depoya qəbul edildi.`);
     setIsModalOpen(false);
     setNote('');
   };
@@ -96,29 +95,31 @@ export const PurchasesView: React.FC = () => {
   return (
     <div className="space-y-6 pb-12 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-zinc-200 dark:border-zinc-800">
         <div>
-          <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2">
+          <h2 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
             <span>Mal Qəbulu (Depo Girişi)</span>
-            <span className="text-xs bg-red-950 text-red-400 font-bold px-2 py-0.5 rounded-full border border-red-800">
+            <span className="text-xs bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 font-bold px-2 py-0.5 rounded-full border border-red-200 dark:border-red-800">
               Depo Artımı
             </span>
           </h2>
-          <p className="text-xs sm:text-sm text-zinc-400">
+          <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
             Topdan alınan malların qeydiyyatı (depo qalığını avtomatik artırır)
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
+            type="button"
             onClick={() => exportPurchasesToCSV(purchases)}
-            className="px-3 py-1.5 text-xs font-semibold bg-zinc-900 border border-zinc-800 hover:bg-zinc-800 text-zinc-300 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
+            className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Excel / CSV</span>
           </button>
 
           <button
+            type="button"
             onClick={() => {
               const first = products[0];
               if (first) {
@@ -129,7 +130,8 @@ export const PurchasesView: React.FC = () => {
               setDate(getTodayISODate());
               setIsModalOpen(true);
             }}
-            className="px-4 py-1.5 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl transition-all shadow-md shadow-red-600/30 flex items-center gap-1.5"
+            style={{ backgroundColor: primaryColor }}
+            className="px-4 py-1.5 text-xs font-bold text-white rounded-xl transition-all shadow-md hover:opacity-90 flex items-center gap-1.5"
           >
             <Plus className="w-4 h-4" />
             <span>Yeni Mal Qəbulu</span>
@@ -139,50 +141,50 @@ export const PurchasesView: React.FC = () => {
 
       {/* Summary KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md flex items-center justify-between">
+        <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm flex items-center justify-between">
           <div>
-            <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+            <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
               Ümumi Qəbul Edilən Mal Sayı
             </span>
-            <div className="text-2xl font-black text-white font-mono mt-1">
+            <div className="text-2xl font-black text-zinc-900 dark:text-white font-mono mt-1">
               {totalPurchasedCount} ədəd
             </div>
             <p className="text-xs text-zinc-500 mt-0.5">{purchases.length} dəfə qəbul əməliyyatı</p>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-red-950 text-red-400 flex items-center justify-center border border-red-900/60">
+          <div className="w-12 h-12 rounded-xl bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400 flex items-center justify-center border border-red-200 dark:border-red-900/60">
             <Package className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="p-5 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md flex items-center justify-between">
+        <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm flex items-center justify-between">
           <div>
-            <span className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+            <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
               Mal Alışına Verilən Cəmi Pul
             </span>
-            <div className="text-2xl font-black text-red-400 font-mono mt-1">
+            <div className="text-2xl font-black text-red-600 dark:text-red-400 font-mono mt-1">
               {formatAZN(totalPaidSum)}
             </div>
             <p className="text-xs text-zinc-500 mt-0.5">Xalis mənfəət hesablanmasında xərc kimi çıxılır</p>
           </div>
-          <div className="w-12 h-12 rounded-xl bg-zinc-800 text-zinc-300 flex items-center justify-center">
+          <div className="w-12 h-12 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 flex items-center justify-center">
             <DollarSign className="w-6 h-6" />
           </div>
         </div>
       </div>
 
       {/* Product-level Totals Strip */}
-      <div className="p-4 bg-zinc-900 rounded-2xl border border-zinc-800 shadow-md space-y-2">
-        <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-400">
+      <div className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm space-y-2">
+        <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
           Məhsul Üzrə Ümumi Gələn Say və Verilən Pul
         </h3>
         <div className="flex flex-wrap gap-2 pt-1">
           {Object.entries(productSummary).map(([pId, info]) => (
             <div
               key={pId}
-              className="px-3 py-1.5 bg-zinc-950 rounded-xl text-xs flex items-center gap-2 border border-zinc-800"
+              className="px-3 py-1.5 bg-zinc-50 dark:bg-zinc-950 rounded-xl text-xs flex items-center gap-2 border border-zinc-200 dark:border-zinc-800"
             >
-              <span className="font-semibold text-zinc-200">{info.name}:</span>
-              <span className="font-mono font-bold text-red-400">{info.quantity} ədəd</span>
+              <span className="font-semibold text-zinc-800 dark:text-zinc-200">{info.name}:</span>
+              <span className="font-mono font-bold text-red-600 dark:text-red-400">{info.quantity} ədəd</span>
               <span className="text-zinc-500 font-mono">({formatAZN(info.amount)})</span>
             </div>
           ))}
@@ -193,16 +195,16 @@ export const PurchasesView: React.FC = () => {
       </div>
 
       {/* Table of Purchases */}
-      <div className="bg-zinc-900 rounded-2xl border border-zinc-800 shadow-md overflow-hidden space-y-3">
-        <div className="p-4 border-b border-zinc-800 flex items-center justify-between gap-3">
+      <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden space-y-3">
+        <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3">
           <div className="relative flex-1 max-w-sm">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500" />
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Qəbul qeydlərində axtar..."
-              className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-zinc-700 bg-zinc-950 text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
             />
           </div>
           <span className="text-xs text-zinc-500 font-medium">Cəmi: {filteredPurchases.length} qeyd</span>
@@ -215,7 +217,7 @@ export const PurchasesView: React.FC = () => {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs">
-              <thead className="bg-zinc-950 text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
+              <thead className="bg-zinc-50 dark:bg-zinc-950 text-zinc-500 dark:text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
                 <tr>
                   <th className="py-3 px-4">Tarix</th>
                   <th className="py-3 px-4">Məhsul</th>
@@ -226,40 +228,60 @@ export const PurchasesView: React.FC = () => {
                   {isAdmin && <th className="py-3 px-4 text-center">Əməliyyat</th>}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800">
+              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                 {filteredPurchases.map(p => (
-                  <tr key={p.id} className="hover:bg-zinc-800/40">
-                    <td className="py-3 px-4 font-mono text-zinc-400 whitespace-nowrap">
+                  <tr key={p.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
+                    <td className="py-3 px-4 font-mono text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
                       {formatDateAZ(p.date)}
                     </td>
-                    <td className="py-3 px-4 font-bold text-white">
+                    <td className="py-3 px-4 font-bold text-zinc-900 dark:text-white">
                       {p.productName}
                     </td>
-                    <td className="py-3 px-4 text-center font-mono font-bold text-red-400">
+                    <td className="py-3 px-4 text-center font-mono font-bold text-red-600 dark:text-red-400">
                       +{p.quantity} ədəd
                     </td>
-                    <td className="py-3 px-4 text-right font-mono font-bold text-white">
+                    <td className="py-3 px-4 text-right font-mono font-bold text-zinc-900 dark:text-white">
                       {formatAZN(p.paidAmount)}
                     </td>
-                    <td className="py-3 px-4 text-zinc-400 max-w-xs truncate">
+                    <td className="py-3 px-4 text-zinc-500 dark:text-zinc-400 max-w-xs truncate">
                       {p.note || '—'}
                     </td>
-                    <td className="py-3 px-4 font-mono text-[11px] text-zinc-400">
+                    <td className="py-3 px-4 font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
                       @{p.createdBy}
                     </td>
                     {isAdmin && (
                       <td className="py-3 px-4 text-center">
-                        <button
-                          onClick={() => {
-                            if (confirm('Bu mal qəbulu qeydini silmək istəyirsiniz?')) {
-                              deletePurchase(p.id);
-                            }
-                          }}
-                          className="p-1 text-red-400 hover:text-red-300 transition-colors"
-                          title="Sil"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {confirmDeleteId === p.id ? (
+                          <div className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                deletePurchase(p.id);
+                                setConfirmDeleteId(null);
+                                showToast('success', 'Mal qəbulu qeydi silindi.');
+                              }}
+                              className="px-2 py-0.5 text-[10px] font-bold bg-red-600 text-white rounded-md"
+                            >
+                              Sil
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="px-1.5 py-0.5 text-[10px] font-semibold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-md"
+                            >
+                              Yox
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDeleteId(p.id)}
+                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-500 transition-colors"
+                            title="Sil"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </td>
                     )}
                   </tr>
@@ -272,15 +294,16 @@ export const PurchasesView: React.FC = () => {
 
       {/* Modal: New Purchase Intake */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-zinc-900 w-full max-w-md rounded-3xl shadow-2xl border border-zinc-800 overflow-hidden flex flex-col">
-            <div className="p-6 border-b border-zinc-800 flex items-center justify-between">
-              <h3 className="text-base font-bold text-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col">
+            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+              <h3 className="text-base font-bold text-zinc-900 dark:text-white">
                 Yeni Mal Qəbulu Daxil Et
               </h3>
               <button
+                type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="p-1.5 text-zinc-400 hover:text-white rounded-lg"
+                className="p-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -288,7 +311,7 @@ export const PurchasesView: React.FC = () => {
 
             <form onSubmit={handleSavePurchase} className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                   Tarix *
                 </label>
                 <input
@@ -296,18 +319,18 @@ export const PurchasesView: React.FC = () => {
                   required
                   value={date}
                   onChange={e => setDate(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm font-mono rounded-xl border border-zinc-700 bg-zinc-800 text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="w-full px-3.5 py-2 text-sm font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                   Məhsul *
                 </label>
                 <select
                   value={selectedProductId}
                   onChange={e => handleProductSelect(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-700 bg-zinc-800 text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
                 >
                   {products.map(p => (
                     <option key={p.id} value={p.id}>
@@ -319,7 +342,7 @@ export const PurchasesView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">
+                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                     Gələn Say (ədəd) *
                   </label>
                   <input
@@ -328,12 +351,12 @@ export const PurchasesView: React.FC = () => {
                     required
                     value={quantity}
                     onChange={e => handleQuantityChange(e.target.value)}
-                    className="w-full px-3.5 py-2 text-sm font-mono rounded-xl border border-zinc-700 bg-zinc-800 text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    className="w-full px-3.5 py-2 text-sm font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">
+                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                     Verilən Pul (AZN) *
                   </label>
                   <input
@@ -343,13 +366,13 @@ export const PurchasesView: React.FC = () => {
                     required
                     value={paidAmount}
                     onChange={e => setPaidAmount(e.target.value)}
-                    className="w-full px-3.5 py-2 text-sm font-mono rounded-xl border border-zinc-700 bg-zinc-800 text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    className="w-full px-3.5 py-2 text-sm font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
                   Qeyd (Təchizatçı, faktura № və s.)
                 </label>
                 <input
@@ -357,21 +380,22 @@ export const PurchasesView: React.FC = () => {
                   value={note}
                   onChange={e => setNote(e.target.value)}
                   placeholder="məs: Bulaq Suları MMC, topdan gətirilmə"
-                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-700 bg-zinc-800 text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
                 />
               </div>
 
-              <div className="pt-3 border-t border-zinc-800 flex justify-end gap-2">
+              <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-zinc-400 hover:text-white rounded-xl"
+                  className="px-4 py-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-xl"
                 >
                   Ləğv et
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-md shadow-red-600/30"
+                  style={{ backgroundColor: primaryColor }}
+                  className="px-5 py-2 text-xs font-bold text-white rounded-xl shadow-md hover:opacity-90"
                 >
                   Depoya Qəbul Et
                 </button>
