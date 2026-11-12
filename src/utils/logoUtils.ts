@@ -95,10 +95,62 @@ export function generateCanvasIcon(
   });
 }
 
-let lastManifestBlobUrl: string | null = null;
+export const PWA_ASSET_VERSION = '20261112';
+
+function appendCacheBust(url: string, version: string): string {
+  if (!url || url.startsWith('data:') || url.startsWith('blob:')) return url;
+  try {
+    const u = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'https://localhost');
+    u.searchParams.set('v', version);
+    return url.startsWith('http') ? u.toString() : `${u.pathname}${u.search}${u.hash}`;
+  } catch {
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}v=${encodeURIComponent(version)}`;
+  }
+}
+
+function isHttpRasterImageUrl(url: string): boolean {
+  if (!/^https?:\/\//i.test(url)) return false;
+  const cleanPath = url.split('?')[0].toLowerCase();
+  return !cleanPath.endsWith('.svg');
+}
+
+function setAllAppleTouchIcons(href: string): void {
+  const appleLinks = Array.from(
+    document.querySelectorAll('link[rel="apple-touch-icon"]')
+  ) as HTMLLinkElement[];
+
+  if (appleLinks.length === 0) {
+    const link = document.createElement('link');
+    link.rel = 'apple-touch-icon';
+    link.sizes = '180x180';
+    link.href = href;
+    document.head.appendChild(link);
+    return;
+  }
+
+  for (const link of appleLinks) {
+    link.href = href;
+  }
+}
+
+function ensureHttpManifestLink(version: string): void {
+  let manifestLink = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null;
+  if (!manifestLink) {
+    manifestLink = document.createElement('link');
+    manifestLink.rel = 'manifest';
+    document.head.appendChild(manifestLink);
+  }
+  const targetHref = `/manifest.json?v=${encodeURIComponent(version)}`;
+  if (!manifestLink.getAttribute('href')?.startsWith('/manifest.json')) {
+    manifestLink.href = targetHref;
+  }
+}
 
 /**
- * Updates document title, theme-color, favicon, apple-touch-icon, and dynamic PWA manifest
+ * Updates document title, theme-color, favicon, apple-touch-icon, and manifest metadata.
+ * Keeps manifest.json as a real HTTP endpoint so Android WebAPK installation never breaks,
+ * and updates all apple-touch-icon tags with cache-busted URLs for iOS Safari.
  */
 export async function updateBrowserBranding(
   logoUrl: string | null | undefined,
@@ -108,6 +160,7 @@ export async function updateBrowserBranding(
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 
   const cleanAppName = appName.trim() || 'Zal Barı';
+  const shortTitle = cleanAppName.length > 12 ? cleanAppName.substring(0, 12) : cleanAppName;
   document.title = `${cleanAppName} — İdarəetmə və POS Sistemi`;
 
   const themeMeta = document.querySelector('meta[name="theme-color"]');
@@ -116,97 +169,73 @@ export async function updateBrowserBranding(
   }
   const appleTitleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]');
   if (appleTitleMeta) {
-    appleTitleMeta.setAttribute('content', cleanAppName);
+    appleTitleMeta.setAttribute('content', shortTitle);
   }
   const appNameMeta = document.querySelector('meta[name="application-name"]');
   if (appNameMeta) {
     appNameMeta.setAttribute('content', cleanAppName);
   }
 
+  ensureHttpManifestLink(PWA_ASSET_VERSION);
+
   if (!logoUrl) {
-    const existingApple = document.querySelector('link[rel="apple-touch-icon"]');
-    if (existingApple) existingApple.setAttribute('href', '/apple-touch-icon.png');
-    const existingFavicon = document.querySelector('link[rel="icon"]');
-    if (existingFavicon) existingFavicon.setAttribute('href', '/icon.svg');
+    setAllAppleTouchIcons(`/apple-touch-icon.png?v=${PWA_ASSET_VERSION}`);
+
+    const iconLinks = Array.from(document.querySelectorAll('link[rel="icon"]')) as HTMLLinkElement[];
+    for (const link of iconLinks) {
+      const sizes = link.getAttribute('sizes');
+      if (link.type === 'image/svg+xml') {
+        link.href = `/icon.svg?v=${PWA_ASSET_VERSION}`;
+      } else if (sizes === '16x16') {
+        link.href = `/favicon-16x16.png?v=${PWA_ASSET_VERSION}`;
+      } else if (sizes === '32x32') {
+        link.href = `/favicon-32x32.png?v=${PWA_ASSET_VERSION}`;
+      } else if (sizes === '192x192') {
+        link.href = `/pwa-192x192.png?v=${PWA_ASSET_VERSION}`;
+      } else if (sizes === '512x512') {
+        link.href = `/pwa-512x512.png?v=${PWA_ASSET_VERSION}`;
+      } else {
+        link.href = `/icon.svg?v=${PWA_ASSET_VERSION}`;
+      }
+    }
     return;
   }
 
   try {
-    const [faviconUrl, appleTouchUrl, icon192Url, icon512Url, iconMaskableUrl] = await Promise.all([
+    const cacheKey = `${PWA_ASSET_VERSION}-${logoUrl.length}`;
+    const [favicon32Url, appleCanvasUrl] = await Promise.all([
       generateCanvasIcon(logoUrl, 32, false, 'transparent'),
       generateCanvasIcon(logoUrl, 180, false, '#09090b'),
-      generateCanvasIcon(logoUrl, 192, false, '#09090b'),
-      generateCanvasIcon(logoUrl, 512, false, '#09090b'),
-      generateCanvasIcon(logoUrl, 512, true, '#09090b'),
     ]);
 
-    let faviconLink = document.querySelector('link[rel="icon"]') as HTMLLinkElement | null;
-    if (!faviconLink) {
-      faviconLink = document.createElement('link');
+    const iconLinks = Array.from(document.querySelectorAll('link[rel="icon"]')) as HTMLLinkElement[];
+    if (iconLinks.length === 0) {
+      const faviconLink = document.createElement('link');
       faviconLink.rel = 'icon';
+      faviconLink.type = 'image/png';
+      faviconLink.href = favicon32Url;
       document.head.appendChild(faviconLink);
+    } else {
+      for (const link of iconLinks) {
+        if (link.type === 'image/svg+xml') {
+          link.type = 'image/png';
+        }
+        link.href = favicon32Url;
+      }
     }
-    faviconLink.type = 'image/png';
-    faviconLink.href = faviconUrl;
 
-    let appleLink = document.querySelector('link[rel="apple-touch-icon"]') as HTMLLinkElement | null;
-    if (!appleLink) {
-      appleLink = document.createElement('link');
-      appleLink.rel = 'apple-touch-icon';
-      document.head.appendChild(appleLink);
-    }
-    appleLink.href = appleTouchUrl;
+    // iOS Safari reliably loads real HTTPS raster URLs for Add to Home Screen;
+    // avoid putting SVG or oversized data URIs into apple-touch-icon when an HTTPS PNG/JPG/WebP exists.
+    const appleHref = isHttpRasterImageUrl(logoUrl)
+      ? appendCacheBust(logoUrl, cacheKey)
+      : appleCanvasUrl.startsWith('data:image/png')
+      ? appleCanvasUrl
+      : `/apple-touch-icon.png?v=${PWA_ASSET_VERSION}`;
 
-    const dynamicManifest = {
-      id: '/',
-      name: cleanAppName,
-      short_name: cleanAppName.length > 12 ? cleanAppName.substring(0, 12) : cleanAppName,
-      description: `${cleanAppName} — İdman Zalı Barı İdarəetmə və Satış Sistemi`,
-      start_url: '/',
-      scope: '/',
-      display: 'standalone',
-      background_color: '#09090b',
-      theme_color: primaryColor || '#dc2626',
-      icons: [
-        {
-          src: icon192Url,
-          sizes: '192x192',
-          type: 'image/png',
-          purpose: 'any',
-        },
-        {
-          src: icon512Url,
-          sizes: '512x512',
-          type: 'image/png',
-          purpose: 'any',
-        },
-        {
-          src: iconMaskableUrl,
-          sizes: '512x512',
-          type: 'image/png',
-          purpose: 'maskable',
-        },
-      ],
-    };
-
-    if (lastManifestBlobUrl) {
-      URL.revokeObjectURL(lastManifestBlobUrl);
-    }
-    const manifestBlob = new Blob([JSON.stringify(dynamicManifest, null, 2)], {
-      type: 'application/manifest+json',
-    });
-    const manifestBlobUrl = URL.createObjectURL(manifestBlob);
-    lastManifestBlobUrl = manifestBlobUrl;
-
-    let manifestLink = document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null;
-    if (!manifestLink) {
-      manifestLink = document.createElement('link');
-      manifestLink.rel = 'manifest';
-      document.head.appendChild(manifestLink);
-    }
-    manifestLink.href = manifestBlobUrl;
+    setAllAppleTouchIcons(appleHref);
   } catch (err) {
     console.error('Failed to update browser branding icons:', err);
+    setAllAppleTouchIcons(`/apple-touch-icon.png?v=${PWA_ASSET_VERSION}`);
   }
 }
 

@@ -69,8 +69,8 @@ export function sendLowStockNotification(productName: string, activeStock: numbe
       const title = '⚠️ Qalıq Xəbərdarlığı — Zal Barı';
       const options: NotificationOptions = {
         body: `"${productName}" məhsulunun aktiv depo qalığı ${activeStock} ədədə düşdü! (Minimum hədd: ${threshold})`,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
+        icon: '/pwa-192x192.png?v=20261112',
+        badge: '/pwa-192x192.png?v=20261112',
         tag: `stock-${productName}`,
       };
       new Notification(title, options);

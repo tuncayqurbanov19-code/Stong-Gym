@@ -4,6 +4,8 @@ import path from 'path';
 import {defineConfig} from 'vite';
 import {VitePWA} from 'vite-plugin-pwa';
 
+const PWA_ICON_VERSION = '20261112';
+
 export default defineConfig(() => {
   return {
     plugins: [
@@ -11,12 +13,22 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['apple-touch-icon.png', 'icon.svg', 'pwa-192x192.png', 'pwa-512x512.png'],
+        manifestFilename: 'manifest.json',
+        includeAssets: [
+          'apple-touch-icon.png',
+          'favicon-16x16.png',
+          'favicon-32x32.png',
+          'icon.svg',
+          'pwa-192x192.png',
+          'pwa-512x512.png',
+          'pwa-maskable-512x512.png',
+        ],
         manifest: {
           id: '/',
           name: 'Zal Barı — İdarəetmə və POS',
           short_name: 'Zal Barı',
           description: 'İdman zalı barı üçün kassa, satış, depo və borc idarəetmə sistemi.',
+          lang: 'az',
           theme_color: '#09090b',
           background_color: '#09090b',
           display: 'standalone',
@@ -25,19 +37,19 @@ export default defineConfig(() => {
           scope: '/',
           icons: [
             {
-              src: '/pwa-192x192.png',
+              src: `/pwa-192x192.png?v=${PWA_ICON_VERSION}`,
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-512x512.png',
+              src: `/pwa-512x512.png?v=${PWA_ICON_VERSION}`,
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-maskable-512x512.png',
+              src: `/pwa-maskable-512x512.png?v=${PWA_ICON_VERSION}`,
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
@@ -45,8 +57,38 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
+          skipWaiting: true,
+          clientsClaim: true,
+          cleanupOutdatedCaches: true,
           maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          runtimeCaching: [
+            {
+              urlPattern: /\/manifest\.json(\?.*)?$/i,
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'pwa-manifest-cache',
+                expiration: {
+                  maxEntries: 5,
+                  maxAgeSeconds: 60 * 5,
+                },
+              },
+            },
+            {
+              urlPattern: /^https:\/\/.*\.supabase\.co\/storage\/v1\/object\/public\/branding\/.*/i,
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'branding-logo-cache',
+                expiration: {
+                  maxEntries: 20,
+                  maxAgeSeconds: 60 * 60 * 24 * 7,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+          ],
         },
         devOptions: {
           enabled: true,
