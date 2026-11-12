@@ -5,6 +5,8 @@ import {
   PurchaseIntake,
   Sale,
   DebtRecord,
+  CustomerAccount,
+  CustomerTransaction,
   DailyReport,
   Expense,
   AppSettings,
@@ -37,151 +39,21 @@ import {
   mapUserToDB,
   mapDBToAuditLog,
   mapAuditLogToDB,
+  mapDBToCustomerAccount,
+  mapCustomerAccountToDB,
 } from '../lib/supabase';
+import {
+  INITIAL_SETTINGS,
+  INITIAL_USERS,
+  INITIAL_PRODUCTS,
+  INITIAL_SALES,
+  INITIAL_DEBTS,
+  INITIAL_DAILY_REPORTS,
+  INITIAL_CUSTOMERS,
+} from '../data/initialSystemData';
 
-// Initial Users
-const INITIAL_USERS: User[] = [
-  {
-    id: 'u-admin',
-    username: 'admin',
-    password: 'admin123',
-    name: 'Müdir (Admin)',
-    role: 'admin',
-    isActive: true,
-    createdAt: '2026-11-01T08:00:00Z',
-  },
-  {
-    id: 'u-isci1',
-    username: 'isci',
-    password: 'isci123',
-    name: 'Rəşad Əliyev (Barman)',
-    role: 'isci',
-    isActive: true,
-    createdAt: '2026-11-01T09:00:00Z',
-  },
-];
-
-const INITIAL_SETTINGS: AppSettings = {
-  minStockThreshold: 5,
-  autoConfirmSales: true,
-  barName: 'Zal Barı',
-  enablePushNotifications: true,
-};
-
-// Default Products (0.5 L su = 0.5 AZN, 1 L su = 1 AZN, 1.5 L su = 1.2 AZN and fitness supplements)
-const INITIAL_PRODUCTS: Product[] = [
-  {
-    id: 'prod-1',
-    name: '0,5 L Su',
-    barcode: '47600101',
-    salePrice: 0.5,
-    buyPrice: 0.25,
-    category: 'Su',
-    volume: '0.5 L',
-    initialStock: 100,
-    minStockAlert: 10,
-    note: 'Qazsız təbii bulaq suyu',
-    createdAt: '2026-11-01T08:00:00Z',
-  },
-  {
-    id: 'prod-2',
-    name: '1 L Su',
-    barcode: '47600102',
-    salePrice: 1.0,
-    buyPrice: 0.5,
-    category: 'Su',
-    volume: '1 L',
-    initialStock: 80,
-    minStockAlert: 8,
-    note: 'Qazsız təbii su',
-    createdAt: '2026-11-01T08:00:00Z',
-  },
-  {
-    id: 'prod-3',
-    name: '1,5 L Su',
-    barcode: '47600103',
-    salePrice: 1.2,
-    buyPrice: 0.6,
-    category: 'Su',
-    volume: '1.5 L',
-    initialStock: 60,
-    minStockAlert: 6,
-    note: 'Qazsız böyük qablaşdırma',
-    createdAt: '2026-11-01T08:00:00Z',
-  },
-  {
-    id: 'prod-4',
-    name: 'Protein Şeyk (Banan/Vanil)',
-    barcode: '47600104',
-    salePrice: 3.5,
-    buyPrice: 1.8,
-    category: 'Protein',
-    volume: '400 ml',
-    initialStock: 45,
-    minStockAlert: 5,
-    note: '25g zərdab zülalı ilə hazır içki',
-    createdAt: '2026-11-01T08:00:00Z',
-  },
-  {
-    id: 'prod-5',
-    name: 'BCAA Soyuq İçki',
-    barcode: '47600105',
-    salePrice: 2.5,
-    buyPrice: 1.3,
-    category: 'Enerji və BCAA',
-    volume: '330 ml',
-    initialStock: 30,
-    minStockAlert: 5,
-    note: 'Limon və Giləmeyvə tamlı',
-    createdAt: '2026-11-01T08:00:00Z',
-  },
-  {
-    id: 'prod-6',
-    name: 'Red Bull Enerji İçkisi',
-    barcode: '47600106',
-    salePrice: 3.0,
-    buyPrice: 1.7,
-    category: 'Enerji və BCAA',
-    volume: '250 ml',
-    initialStock: 50,
-    minStockAlert: 5,
-    note: 'Klassik enerji içkisi',
-    createdAt: '2026-11-01T08:00:00Z',
-  },
-  {
-    id: 'prod-7',
-    name: 'Protein Bar (Şokoladlı)',
-    barcode: '47600107',
-    salePrice: 2.0,
-    buyPrice: 1.0,
-    category: 'Qəlyanaltı',
-    volume: '60 g',
-    initialStock: 40,
-    minStockAlert: 5,
-    note: '20g protein, az şəkərli baton',
-    createdAt: '2026-11-01T08:00:00Z',
-  },
-  {
-    id: 'prod-8',
-    name: 'L-Carnitine Shot 3000',
-    barcode: '47600108',
-    salePrice: 2.8,
-    buyPrice: 1.4,
-    category: 'Əlavələr',
-    volume: '60 ml',
-    initialStock: 25,
-    minStockAlert: 5,
-    note: 'Məşqdən əvvəl yağ yandırmağa köməkçi',
-    createdAt: '2026-11-01T08:00:00Z',
-  },
-];
-
-// ZERO INITIAL TRANSACTIONS as requested by user ("əlavə olaraq sıfırla, hazırda olan satış və s. olmasın, mən əlavə edcəm")
 const INITIAL_PURCHASES: PurchaseIntake[] = [];
-const INITIAL_SALES: Sale[] = [];
-const INITIAL_DEBTS: DebtRecord[] = [];
 const INITIAL_EXPENSES: Expense[] = [];
-const INITIAL_DAILY_REPORTS: DailyReport[] = [];
 
 const INITIAL_AUDIT_LOGS: AuditLog[] = [
   {
@@ -190,7 +62,7 @@ const INITIAL_AUDIT_LOGS: AuditLog[] = [
     userId: 'u-admin',
     username: 'admin',
     action: 'Baza Hazırlandı',
-    details: 'Zal Barı idarəetmə bazası təmiz satış rejimində işə salındı.',
+    details: 'Zal Barı idarəetmə bazası 11.11.2026 nüsxəsi ilə işə salındı.',
   },
 ];
 
@@ -223,6 +95,20 @@ interface AppContextType {
   debts: DebtRecord[];
   addDebt: (debt: Omit<DebtRecord, 'id' | 'createdAt' | 'updatedAt' | 'payments' | 'remainingAmount' | 'status'>) => void;
   payDebt: (debtId: string, amount: number, note?: string) => void;
+  customerAccounts: CustomerAccount[];
+  depositToCustomer: (
+    customerName: string,
+    amount: number,
+    paymentType?: 'naqd' | 'kart' | 'pos',
+    note?: string
+  ) => void;
+  chargeCustomerBalance: (
+    customerName: string,
+    amount: number,
+    note?: string,
+    saleId?: string
+  ) => boolean;
+  deleteCustomerAccount: (customerId: string) => void;
   dailyReports: DailyReport[];
   saveDailyReport: (report: {
     date: string;
@@ -238,6 +124,7 @@ interface AppContextType {
   updateSettings: (newSettings: Partial<AppSettings>) => void;
   auditLogs: AuditLog[];
   resetToSampleData: () => void;
+  resetToOriginalBackup: () => void;
   clearAllTransactions: () => void;
   restoreFromBackup: (jsonData: string) => boolean;
   theme: 'light' | 'dark';
@@ -276,30 +163,38 @@ function saveToDualStorage<T>(key: string, value: T): void {
 }
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Check migration flag to ensure existing browser localStorage sales are zeroed out as requested
-  const isZeroedV2 = localStorage.getItem('zalbar_zeroed_v2') === 'true';
+  // Check migration flag to initialize user's real business database from 11.11.2026
+  if (typeof window !== 'undefined' && localStorage.getItem('zalbar_backup_11_11_v3') !== 'true') {
+    try {
+      localStorage.setItem('zalbar_users', JSON.stringify(INITIAL_USERS));
+      localStorage.setItem('zalbar_products', JSON.stringify(INITIAL_PRODUCTS));
+      localStorage.setItem('zalbar_sales', JSON.stringify(INITIAL_SALES));
+      localStorage.setItem('zalbar_debts', JSON.stringify(INITIAL_DEBTS));
+      localStorage.setItem('zalbar_dailyReports', JSON.stringify(INITIAL_DAILY_REPORTS));
+      localStorage.setItem('zalbar_customerAccounts', JSON.stringify(INITIAL_CUSTOMERS));
+      localStorage.setItem('zalbar_currentUser', JSON.stringify(INITIAL_USERS[1])); // admin with admin2025
+      localStorage.setItem('zalbar_backup_11_11_v3', 'true');
+    } catch (e) {
+      console.warn('Initial backup seed error:', e);
+    }
+  }
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    return loadFromStorage<User | null>('currentUser', INITIAL_USERS[0]);
+    return loadFromStorage<User | null>('currentUser', INITIAL_USERS[1]);
   });
 
   const [users, setUsers] = useState<User[]>(() => loadFromStorage('users', INITIAL_USERS));
   const [products, setProducts] = useState<Product[]>(() => loadFromStorage('products', INITIAL_PRODUCTS));
-  const [purchases, setPurchases] = useState<PurchaseIntake[]>(() =>
-    isZeroedV2 ? loadFromStorage('purchases', INITIAL_PURCHASES) : INITIAL_PURCHASES
-  );
-  const [sales, setSales] = useState<Sale[]>(() =>
-    isZeroedV2 ? loadFromStorage('sales', INITIAL_SALES) : INITIAL_SALES
-  );
-  const [debts, setDebts] = useState<DebtRecord[]>(() =>
-    isZeroedV2 ? loadFromStorage('debts', INITIAL_DEBTS) : INITIAL_DEBTS
+  const [purchases, setPurchases] = useState<PurchaseIntake[]>(() => loadFromStorage('purchases', INITIAL_PURCHASES));
+  const [sales, setSales] = useState<Sale[]>(() => loadFromStorage('sales', INITIAL_SALES));
+  const [debts, setDebts] = useState<DebtRecord[]>(() => loadFromStorage('debts', INITIAL_DEBTS));
+  const [customerAccounts, setCustomerAccounts] = useState<CustomerAccount[]>(() =>
+    loadFromStorage('customerAccounts', INITIAL_CUSTOMERS)
   );
   const [dailyReports, setDailyReports] = useState<DailyReport[]>(() =>
-    isZeroedV2 ? loadFromStorage('dailyReports', INITIAL_DAILY_REPORTS) : INITIAL_DAILY_REPORTS
+    loadFromStorage('dailyReports', INITIAL_DAILY_REPORTS)
   );
-  const [expenses, setExpenses] = useState<Expense[]>(() =>
-    isZeroedV2 ? loadFromStorage('expenses', INITIAL_EXPENSES) : INITIAL_EXPENSES
-  );
+  const [expenses, setExpenses] = useState<Expense[]>(() => loadFromStorage('expenses', INITIAL_EXPENSES));
   const [settings, setSettings] = useState<AppSettings>(() =>
     loadFromStorage('settings', INITIAL_SETTINGS)
   );
@@ -341,6 +236,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         expensesRes,
         settingsRes,
         logsRes,
+        customersRes,
       ] = await Promise.all([
         supabase.from('products').select('*'),
         supabase.from('users').select('*'),
@@ -351,6 +247,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         supabase.from('expenses').select('*').order('created_at', { ascending: false }),
         supabase.from('app_settings').select('*').eq('id', 'global').maybeSingle(),
         supabase.from('audit_logs').select('*').order('timestamp', { ascending: false }).limit(100),
+        supabase.from('customer_accounts').select('*').order('name'),
       ]);
 
       if (prodsRes.data && prodsRes.data.length > 0) setProducts(prodsRes.data.map(mapDBToProduct));
@@ -358,6 +255,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (salesRes.data) setSales(salesRes.data.map(mapDBToSale));
       if (purchasesRes.data) setPurchases(purchasesRes.data.map(mapDBToPurchase));
       if (debtsRes.data) setDebts(debtsRes.data.map(mapDBToDebt));
+      if (customersRes.data && customersRes.data.length > 0) {
+        setCustomerAccounts(customersRes.data.map(mapDBToCustomerAccount));
+      }
       if (reportsRes.data) setDailyReports(reportsRes.data.map(mapDBToDailyReport));
       if (expensesRes.data) setExpenses(expensesRes.data.map(mapDBToExpense));
       if (settingsRes.data) {
@@ -506,6 +406,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           });
         }
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'customer_accounts' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'INSERT') {
+          const newCust = mapDBToCustomerAccount(payload.new);
+          setCustomerAccounts((prev) => {
+            if (prev.some((c) => c.id === newCust.id)) return prev;
+            return [...prev, newCust];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          const updated = mapDBToCustomerAccount(payload.new);
+          setCustomerAccounts((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+        } else if (payload.eventType === 'DELETE') {
+          setCustomerAccounts((prev) => prev.filter((c) => c.id !== payload.old.id));
+        }
+      })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           setIsSupabaseConnected(true);
@@ -553,6 +468,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (debts.length > 0) {
         await supabase.from('debts').upsert(debts.map(mapDebtToDB));
       }
+      if (customerAccounts.length > 0) {
+        await supabase.from('customer_accounts').upsert(customerAccounts.map(mapCustomerAccountToDB));
+      }
       if (dailyReports.length > 0) {
         await supabase.from('daily_reports').upsert(dailyReports.map(mapDailyReportToDB));
       }
@@ -568,18 +486,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, error: err?.message || 'Sinxronizasiya xətası baş verdi' };
     }
   };
-
-  // Set the zeroed flag on first mount
-  useEffect(() => {
-    if (!isZeroedV2) {
-      localStorage.setItem('zalbar_zeroed_v2', 'true');
-      saveToDualStorage('sales', []);
-      saveToDualStorage('purchases', []);
-      saveToDualStorage('debts', []);
-      saveToDualStorage('expenses', []);
-      saveToDualStorage('dailyReports', []);
-    }
-  }, [isZeroedV2]);
 
   // Load from IndexedDB on startup if localStorage was cleared
   useEffect(() => {
@@ -628,6 +534,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     saveToDualStorage('debts', debts);
   }, [debts]);
+
+  useEffect(() => {
+    saveToDualStorage('customerAccounts', customerAccounts);
+  }, [customerAccounts]);
 
   useEffect(() => {
     saveToDualStorage('dailyReports', dailyReports);
@@ -926,6 +836,123 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  const depositToCustomer = (
+    customerName: string,
+    amount: number,
+    paymentType: 'naqd' | 'kart' | 'pos' = 'naqd',
+    note?: string
+  ) => {
+    const cleanName = customerName.trim();
+    if (!cleanName || amount <= 0) return;
+
+    const tx: CustomerTransaction = {
+      id: `ctx-${Date.now()}`,
+      type: 'deposit',
+      amount,
+      date: getTodayISODate(),
+      time: getCurrentTimeHHMM(),
+      note: note || `Balans artırılması (${paymentType.toUpperCase()})`,
+      createdBy: currentUser?.username || 'admin',
+    };
+
+    setCustomerAccounts(prev => {
+      const existing = prev.find(c => c.name.toLowerCase() === cleanName.toLowerCase());
+      let updated: CustomerAccount[];
+      if (existing) {
+        const newAcc: CustomerAccount = {
+          ...existing,
+          balance: Math.round((existing.balance + amount) * 100) / 100,
+          totalDeposited: Math.round((existing.totalDeposited + amount) * 100) / 100,
+          updatedAt: new Date().toISOString(),
+          transactions: [tx, ...(existing.transactions || [])],
+        };
+        updated = prev.map(c => (c.id === existing.id ? newAcc : c));
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          safeDbExec(supabase.from('customer_accounts').upsert(mapCustomerAccountToDB(newAcc)));
+        }
+      } else {
+        const newAcc: CustomerAccount = {
+          id: `cust-${Date.now()}`,
+          name: cleanName,
+          balance: amount,
+          totalDeposited: amount,
+          totalSpent: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          transactions: [tx],
+        };
+        updated = [...prev, newAcc];
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          safeDbExec(supabase.from('customer_accounts').insert(mapCustomerAccountToDB(newAcc)));
+        }
+      }
+      return updated;
+    });
+
+    playAlertSound('success');
+    addAuditLog('Müştəri Balansı Artırıldı', `${cleanName}: +${amount.toFixed(2)} AZN (${paymentType.toUpperCase()})`);
+  };
+
+  const chargeCustomerBalance = (
+    customerName: string,
+    amount: number,
+    note?: string,
+    saleId?: string
+  ): boolean => {
+    const cleanName = customerName.trim();
+    const existing = customerAccounts.find(c => c.name.toLowerCase() === cleanName.toLowerCase());
+    if (!existing) {
+      return false;
+    }
+
+    const tx: CustomerTransaction = {
+      id: `ctx-${Date.now()}`,
+      type: 'charge',
+      amount,
+      date: getTodayISODate(),
+      time: getCurrentTimeHHMM(),
+      note: note || 'Bar alış-verişi (Balansdan çıxılma)',
+      saleId,
+      createdBy: currentUser?.username || 'isci',
+    };
+
+    const newBalance = Math.round((existing.balance - amount) * 100) / 100;
+    const newAcc: CustomerAccount = {
+      ...existing,
+      balance: newBalance,
+      totalSpent: Math.round((existing.totalSpent + amount) * 100) / 100,
+      updatedAt: new Date().toISOString(),
+      transactions: [tx, ...(existing.transactions || [])],
+    };
+
+    setCustomerAccounts(prev => prev.map(c => (c.id === existing.id ? newAcc : c)));
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('customer_accounts').update(mapCustomerAccountToDB(newAcc)).eq('id', existing.id));
+    }
+
+    addAuditLog('Balansdan Çıxıldı', `${cleanName}: -${amount.toFixed(2)} AZN (Qalıq balans: ${newBalance.toFixed(2)} AZN)`);
+    return true;
+  };
+
+  const deleteCustomerAccount = (customerId: string) => {
+    if (currentUser?.role !== 'admin') {
+      alert('İcazə yoxdur: Yalnız Admin müştəri hesabını silə bilər!');
+      return;
+    }
+    const target = customerAccounts.find(c => c.id === customerId);
+    setCustomerAccounts(prev => prev.filter(c => c.id !== customerId));
+    addAuditLog('Müştəri Hesabı Silindi', `Silinən: ${target?.name}`);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      safeDbExec(supabase.from('customer_accounts').delete().eq('id', customerId));
+    }
+  };
+
   const addSale = (saleData: {
     items: { productId: string; quantity: number }[];
     paymentType: Sale['paymentType'];
@@ -959,10 +986,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, error: 'Məhsul tapılmadı!' };
     }
 
+    const saleId = `sale-${Date.now()}`;
+
+    // If payment type is 'balans', check customer account and deduce funds
+    if (saleData.paymentType === 'balans') {
+      const custName = (saleData.debtorName || '').trim();
+      if (!custName) {
+        return { success: false, error: 'Müştəri hesabı seçilməyib!' };
+      }
+      const existing = customerAccounts.find(c => c.name.toLowerCase() === custName.toLowerCase());
+      if (!existing) {
+        return { success: false, error: `"${custName}" adlı müştəri hesabı tapılmadı!` };
+      }
+      if (existing.balance < totalAmount) {
+        return {
+          success: false,
+          error: `Balansda kifayət qədər vəsait yoxdur! Cari balans: ${existing.balance.toFixed(2)} AZN, Tələb olunan: ${totalAmount.toFixed(2)} AZN`,
+        };
+      }
+      chargeCustomerBalance(custName, totalAmount, `Satış #${saleId}`, saleId);
+    }
+
     const isConfirmed = settings.autoConfirmSales;
     const date = saleData.customDate || getTodayISODate();
     const time = saleData.customTime || getCurrentTimeHHMM();
-    const saleId = `sale-${Date.now()}`;
 
     const newSale: Sale = {
       id: saleId,
@@ -971,7 +1018,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       items: resolvedItems,
       totalAmount,
       paymentType: saleData.paymentType,
-      debtorName: saleData.paymentType === 'borc' ? (saleData.debtorName || 'Adsız borclu') : undefined,
+      debtorName:
+        saleData.paymentType === 'borc'
+          ? (saleData.debtorName || 'Adsız borclu')
+          : saleData.paymentType === 'balans'
+          ? (saleData.debtorName || 'Müştəri')
+          : undefined,
       isConfirmed,
       confirmedAt: isConfirmed ? new Date().toISOString() : undefined,
       confirmedBy: isConfirmed ? (currentUser?.username || 'sistem') : undefined,
@@ -1006,8 +1058,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDebts(prev => [createdDebt!, ...prev]);
     }
 
-    // Sync daily report
-    if (isConfirmed && saleData.paymentType !== 'borc') {
+    // Sync daily report (Nağd, Kart, POS are recorded; Borc and Balans are excluded from today's physical drawer)
+    if (isConfirmed && saleData.paymentType !== 'borc' && saleData.paymentType !== 'balans') {
       syncDailyReportForDate(date, newSale);
     }
 
@@ -1312,10 +1364,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPurchases([]);
     setSales([]);
     setDebts([]);
+    setCustomerAccounts([]);
     setDailyReports([]);
     setExpenses([]);
     setSettings(INITIAL_SETTINGS);
     addAuditLog('Baza Sıfırlandı', 'Məlumatlar sıfırlandı.');
+  };
+
+  const resetToOriginalBackup = () => {
+    setUsers(INITIAL_USERS);
+    setProducts(INITIAL_PRODUCTS);
+    setPurchases(INITIAL_PURCHASES);
+    setSales(INITIAL_SALES);
+    setDebts(INITIAL_DEBTS);
+    setCustomerAccounts(INITIAL_CUSTOMERS);
+    setDailyReports(INITIAL_DAILY_REPORTS);
+    setExpenses(INITIAL_EXPENSES);
+    setSettings(INITIAL_SETTINGS);
+    saveToDualStorage('users', INITIAL_USERS);
+    saveToDualStorage('products', INITIAL_PRODUCTS);
+    saveToDualStorage('purchases', INITIAL_PURCHASES);
+    saveToDualStorage('sales', INITIAL_SALES);
+    saveToDualStorage('debts', INITIAL_DEBTS);
+    saveToDualStorage('customerAccounts', INITIAL_CUSTOMERS);
+    saveToDualStorage('dailyReports', INITIAL_DAILY_REPORTS);
+    saveToDualStorage('expenses', INITIAL_EXPENSES);
+    saveToDualStorage('settings', INITIAL_SETTINGS);
+    addAuditLog('Orijinal Baza Bərpa Edildi', '11.11.2026 tarixli orijinal sistem məlumatları tam bərpa olundu.');
   };
 
   const restoreFromBackup = (jsonData: string): boolean => {
@@ -1325,6 +1400,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (data.purchases && Array.isArray(data.purchases)) setPurchases(data.purchases);
       if (data.sales && Array.isArray(data.sales)) setSales(data.sales);
       if (data.debts && Array.isArray(data.debts)) setDebts(data.debts);
+      if (data.customerAccounts && Array.isArray(data.customerAccounts)) setCustomerAccounts(data.customerAccounts);
       if (data.dailyReports && Array.isArray(data.dailyReports)) setDailyReports(data.dailyReports);
       if (data.expenses && Array.isArray(data.expenses)) setExpenses(data.expenses);
       if (data.users && Array.isArray(data.users)) setUsers(data.users);
@@ -1362,6 +1438,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         debts,
         addDebt,
         payDebt,
+        customerAccounts,
+        depositToCustomer,
+        chargeCustomerBalance,
+        deleteCustomerAccount,
         dailyReports,
         saveDailyReport,
         expenses,
@@ -1371,6 +1451,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateSettings,
         auditLogs,
         resetToSampleData,
+        resetToOriginalBackup,
         clearAllTransactions,
         restoreFromBackup,
         theme,

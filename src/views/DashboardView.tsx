@@ -13,6 +13,13 @@ import {
   ArrowRight,
   BellRing,
   PackageCheck,
+  Layers,
+  Droplets,
+  Dumbbell,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+  PieChart,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { formatAZN, formatDateAZ, getTodayISODate, getCurrentMonthKey } from '../utils/dateUtils';
@@ -23,6 +30,7 @@ import {
   calculateNetProfit,
   checkDailyReportDiscrepancy,
   calculateDebtOverview,
+  calculateCategoryBreakdown,
 } from '../utils/financialCalculations';
 import { exportSalesToCSV } from '../utils/exportUtils';
 import { PWAInstallButton } from '../components/PWAInstallButton';
@@ -41,6 +49,20 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
   } = useApp();
 
   const [productPeriod, setProductPeriod] = useState<'today' | 'month'>('today');
+  const [categoryPeriod, setCategoryPeriod] = useState<'today' | 'month' | 'all'>('today');
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
+    'Su': true,
+    'Protein': true,
+    'Əlavələr': true,
+    'Digər': true,
+  });
+
+  const toggleCategoryExpand = (catName: string) => {
+    setExpandedCategories(prev => ({
+      ...prev,
+      [catName]: !prev[catName],
+    }));
+  };
 
   const todayISO = getTodayISODate();
   const currentMonth = getCurrentMonthKey();
@@ -76,6 +98,15 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
   // Top products sold
   const targetSales = productPeriod === 'today' ? todaySales : monthSales;
   const productSaleStats = calculateProductSaleCounts(targetSales);
+
+  // Category & Product level breakdown
+  const selectedCategorySales =
+    categoryPeriod === 'today'
+      ? todaySales
+      : categoryPeriod === 'month'
+      ? monthSales
+      : confirmedSales;
+  const categoryBreakdown = calculateCategoryBreakdown(selectedCategorySales, products);
 
   // Debt overview
   const debtOverview = calculateDebtOverview(debts);
@@ -301,6 +332,234 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
             </p>
           </div>
         </div>
+      </div>
+
+      {/* ======================================================== */}
+      {/* KATEQORİYALAR VƏ MƏHSULLAR ÜZRƏ DETALLI SATIŞ HESABATI */}
+      {/* ======================================================== */}
+      <div className="p-5 sm:p-6 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-xl space-y-6">
+        {/* Header with period toggle */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-800/80">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-red-600/20 text-red-500 border border-red-500/30 flex items-center justify-center">
+                <Layers className="w-4 h-4" />
+              </div>
+              <h3 className="text-base sm:text-lg font-black text-white tracking-tight">
+                Kateqoriyalar və Məhsullar Üzrə Satış Bölgüsü
+              </h3>
+            </div>
+            <p className="text-xs text-zinc-400 mt-1">
+              Satılan ümumi məbləğin su, protein və digər kateqoriyalara bölgüsü və hər məhsulun satışı
+            </p>
+          </div>
+
+          {/* Period selector */}
+          <div className="flex items-center p-1 bg-zinc-950 border border-zinc-800 rounded-xl self-start sm:self-center">
+            <button
+              type="button"
+              onClick={() => setCategoryPeriod('today')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                categoryPeriod === 'today'
+                  ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Bu gün
+            </button>
+            <button
+              type="button"
+              onClick={() => setCategoryPeriod('month')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                categoryPeriod === 'month'
+                  ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Bu ay
+            </button>
+            <button
+              type="button"
+              onClick={() => setCategoryPeriod('all')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                categoryPeriod === 'all'
+                  ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
+                  : 'text-zinc-400 hover:text-white'
+              }`}
+            >
+              Bütün dövr
+            </button>
+          </div>
+        </div>
+
+        {/* Dynamic summary text e.g. "Bu günün 21.80 AZN satışından 16.80 AZN (77.1%) Su kateqoriyasından..." */}
+        <div className="p-3.5 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 flex items-start gap-2.5">
+          <Sparkles className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+          <div className="leading-relaxed">
+            <strong className="text-white">
+              {categoryPeriod === 'today' ? 'Bugünkü Satışların Xülasəsi:' : categoryPeriod === 'month' ? 'Bu Aykı Satışların Xülasəsi:' : 'Bütün Dövrün Satış Xülasəsi:'}
+            </strong>{' '}
+            Ümumi dövriyyə <span className="font-mono font-bold text-red-400">{formatAZN(categoryBreakdown.totalRevenue)}</span> ({categoryBreakdown.totalQuantity} ədəd məhsul).
+            {categoryBreakdown.categories.length > 0 ? (
+              <span>
+                {' '}Bölgü: {categoryBreakdown.categories.map(c => `${c.categoryName}: ${formatAZN(c.totalRevenue)} (${c.percentageOfTotal}%)`).join(' · ')}.
+              </span>
+            ) : (
+              <span> Seçilmiş dövr üçün satış qeydə alınmayıb.</span>
+            )}
+          </div>
+        </div>
+
+        {/* Visual Multi-Segment Bar */}
+        {categoryBreakdown.totalRevenue > 0 && (
+          <div className="space-y-2">
+            <div className="flex justify-between items-center text-[11px] text-zinc-400">
+              <span className="font-medium">Kateqoriya Dövriyyə Payı</span>
+              <span className="font-mono text-zinc-300">{categoryBreakdown.categories.length} kateqoriya</span>
+            </div>
+            <div className="w-full h-3 rounded-full bg-zinc-800 overflow-hidden flex shadow-inner">
+              {categoryBreakdown.categories.map((cat, idx) => {
+                const colors = [
+                  'bg-sky-500',
+                  'bg-red-600',
+                  'bg-amber-500',
+                  'bg-purple-600',
+                  'bg-emerald-500',
+                  'bg-pink-500',
+                ];
+                const colorClass = colors[idx % colors.length];
+                return (
+                  <div
+                    key={cat.categoryName}
+                    className={`${colorClass} h-full transition-all duration-500 relative group`}
+                    style={{ width: `${cat.percentageOfTotal}%` }}
+                    title={`${cat.categoryName}: ${formatAZN(cat.totalRevenue)} (${cat.percentageOfTotal}%)`}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Categories Cards & Detailed Products Breakdown */}
+        {categoryBreakdown.categories.length === 0 ? (
+          <div className="py-8 text-center text-xs text-zinc-500">
+            Bu dövr üçün hələ heç bir satış qeydə alınmayıb. Kassa bölməsindən yeni satışlar daxil edildikcə burada kateqoriya və məhsul üzrə canlı hesabat görünəcək.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4">
+            {categoryBreakdown.categories.map((cat, idx) => {
+              const colors = [
+                { border: 'border-sky-900/60', badge: 'bg-sky-950 text-sky-400 border-sky-800', bar: 'bg-sky-500', text: 'text-sky-400', icon: Droplets },
+                { border: 'border-red-900/60', badge: 'bg-red-950 text-red-400 border-red-800', bar: 'bg-red-600', text: 'text-red-400', icon: Dumbbell },
+                { border: 'border-amber-900/60', badge: 'bg-amber-950 text-amber-400 border-amber-800', bar: 'bg-amber-500', text: 'text-amber-400', icon: Sparkles },
+                { border: 'border-purple-900/60', badge: 'bg-purple-950 text-purple-400 border-purple-800', bar: 'bg-purple-500', text: 'text-purple-400', icon: Layers },
+                { border: 'border-emerald-900/60', badge: 'bg-emerald-950 text-emerald-400 border-emerald-800', bar: 'bg-emerald-500', text: 'text-emerald-400', icon: CheckCircle2 },
+              ];
+              const theme = colors[idx % colors.length];
+              const IconComp = theme.icon;
+              const isExpanded = expandedCategories[cat.categoryName] ?? true;
+
+              return (
+                <div
+                  key={cat.categoryName}
+                  className={`rounded-xl bg-zinc-950/70 border ${theme.border} overflow-hidden transition-all`}
+                >
+                  {/* Category Header Row */}
+                  <div
+                    onClick={() => toggleCategoryExpand(cat.categoryName)}
+                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer hover:bg-zinc-800/40 select-none transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${theme.badge}`}>
+                        <IconComp className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="text-sm font-bold text-white tracking-tight">
+                            {cat.categoryName}
+                          </h4>
+                          <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${theme.badge}`}>
+                            {cat.percentageOfTotal}% Pay
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-400 mt-0.5">
+                          Toplam satılan: <strong className="text-zinc-200">{cat.totalQuantity} ədəd</strong> · {cat.products.length} çeşid məhsul
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between sm:justify-end gap-4">
+                      <div className="text-right">
+                        <div className="text-base font-black font-mono text-white">
+                          {formatAZN(cat.totalRevenue)}
+                        </div>
+                        <div className="text-[10px] text-zinc-400">
+                          {cat.percentageOfTotal}% ümumi gəlir
+                        </div>
+                      </div>
+                      <div className="w-7 h-7 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-400">
+                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Expanded Product Details Table */}
+                  {isExpanded && (
+                    <div className="border-t border-zinc-800/80 bg-zinc-900/40 px-3 py-3 sm:px-4 sm:py-3.5">
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="text-[10px] uppercase font-bold text-zinc-500 border-b border-zinc-800/60">
+                              <th className="pb-2">Məhsulun Adı</th>
+                              <th className="pb-2 text-right">Tək Qiymət</th>
+                              <th className="pb-2 text-center">Satılan Say</th>
+                              <th className="pb-2 text-right">Toplam Satış</th>
+                              <th className="pb-2 text-right">Kateqoriyada Payı</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-zinc-800/50">
+                            {cat.products.map(prod => (
+                              <tr key={prod.productId} className="hover:bg-zinc-800/30 transition-colors">
+                                <td className="py-2.5 font-medium text-zinc-200 pr-2">
+                                  {prod.productName}
+                                </td>
+                                <td className="py-2.5 text-right font-mono text-zinc-400 whitespace-nowrap">
+                                  {formatAZN(prod.unitPrice)}
+                                </td>
+                                <td className="py-2.5 text-center font-mono font-bold text-white whitespace-nowrap">
+                                  <span className="px-2 py-0.5 rounded-md bg-zinc-800 text-zinc-200">
+                                    {prod.quantity} ədəd
+                                  </span>
+                                </td>
+                                <td className="py-2.5 text-right font-mono font-bold text-red-400 whitespace-nowrap">
+                                  {formatAZN(prod.revenue)}
+                                </td>
+                                <td className="py-2.5 text-right whitespace-nowrap pl-3">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <span className="text-[11px] font-mono font-semibold text-zinc-300">
+                                      {prod.percentageOfCategory}%
+                                    </span>
+                                    <div className="w-12 bg-zinc-800 h-1.5 rounded-full overflow-hidden hidden sm:block">
+                                      <div
+                                        className={`${theme.bar} h-full rounded-full`}
+                                        style={{ width: `${prod.percentageOfCategory}%` }}
+                                      />
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Charts Section: 2 Columns */}

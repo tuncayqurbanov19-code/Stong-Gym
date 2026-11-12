@@ -5,6 +5,7 @@ import {
   PurchaseIntake,
   Sale,
   DebtRecord,
+  CustomerAccount,
   DailyReport,
   Expense,
   AppSettings,
@@ -348,3 +349,34 @@ export function mapDBToAuditLog(row: any): AuditLog {
     details: row.details,
   };
 }
+
+export function mapCustomerAccountToDB(c: CustomerAccount) {
+  return {
+    id: c.id,
+    name: c.name,
+    phone: c.phone || null,
+    balance: c.balance,
+    total_deposited: c.totalDeposited,
+    total_spent: c.totalSpent,
+    notes: c.notes || null,
+    transactions: c.transactions || [],
+    created_at: c.createdAt,
+    updated_at: c.updatedAt,
+  };
+}
+
+export function mapDBToCustomerAccount(row: any): CustomerAccount {
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone || undefined,
+    balance: Number(row.balance) || 0,
+    totalDeposited: Number(row.total_deposited) || 0,
+    totalSpent: Number(row.total_spent) || 0,
+    notes: row.notes || undefined,
+    transactions: Array.isArray(row.transactions) ? row.transactions : [],
+    createdAt: row.created_at || new Date().toISOString(),
+    updatedAt: row.updated_at || new Date().toISOString(),
+  };
+}
+

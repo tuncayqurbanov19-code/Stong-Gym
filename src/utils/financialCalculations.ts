@@ -1,10 +1,11 @@
-import { DailyReport, DebtRecord, Expense, PurchaseIntake, Sale } from '../types';
+import { DailyReport, DebtRecord, Expense, Product, PurchaseIntake, Sale } from '../types';
 
 export interface PaymentBreakdown {
   cash: number;
   card: number;
   pos: number;
   debt: number;
+  balance: number;
   total: number;
 }
 
@@ -15,10 +16,35 @@ export interface ProductSaleCount {
   revenue: number;
 }
 
+export interface CategoryProductStat {
+  productId: string;
+  productName: string;
+  quantity: number;
+  revenue: number;
+  unitPrice: number;
+  percentageOfCategory: number;
+}
+
+export interface CategoryBreakdownItem {
+  categoryName: string;
+  revenue: number;
+  quantity: number;
+  totalRevenue: number;
+  totalQuantity: number;
+  percentageOfTotal: number;
+  products: CategoryProductStat[];
+}
+
+export interface CategorySalesSummary {
+  totalRevenue: number;
+  totalQuantity: number;
+  categories: CategoryBreakdownItem[];
+}
+
 export interface DiscrepancyResult {
   dailyReportTotal: number;
   salesTotal: number;
-  difference: number; // dailyReportTotal - salesTotal
+  difference: number;
   isMatching: boolean;
   message: string;
 }
@@ -40,6 +66,7 @@ export function calculatePaymentBreakdown(sales: Sale[]): PaymentBreakdown {
     card: 0,
     pos: 0,
     debt: 0,
+    balance: 0,
     total: 0,
   };
 
@@ -59,10 +86,120 @@ export function calculatePaymentBreakdown(sales: Sale[]): PaymentBreakdown {
       case 'borc':
         result.debt += amount;
         break;
+      case 'balans':
+        result.balance += amount;
+        break;
     }
   }
 
   return result;
+}
+
+/**
+ * Calculates category breakdown and product level details for given sales
+ * (e.g. Su: 14.80 AZN (68%) / 12 pcs, with detailed products list inside)
+ */
+export function calculateCategoryBreakdown(
+  sales: Sale[],
+  products: Product[]
+): CategorySalesSummary {
+  const prodMap = new Map<string, Product>();
+  for (const p of products) {
+    prodMap.set(p.id, p);
+  }
+
+  let totalRevenue = 0;
+  let totalQuantity = 0;
+
+  const categoryMap: Record<
+    string,
+    {
+      categoryName: string;
+      revenue: number;
+      quantity: number;
+      products: Record<
+        string,
+        {
+          productId: string;
+          productName: string;
+          quantity: number;
+          revenue: number;
+          unitPrice: number;
+        }
+      >;
+    }
+  > = {};
+
+  for (const sale of sales) {
+    if (!sale.isConfirmed) continue;
+    for (const item of sale.items) {
+      const prod = prodMap.get(item.productId);
+      const category = (prod?.category?.trim() || 'Digər');
+      const itemQty = Number(item.quantity) || 0;
+      const itemRev = Number(item.totalPrice) || 0;
+
+      totalRevenue += itemRev;
+      totalQuantity += itemQty;
+
+      if (!categoryMap[category]) {
+        categoryMap[category] = {
+          categoryName: category,
+          revenue: 0,
+          quantity: 0,
+          products: {},
+        };
+      }
+
+      categoryMap[category].revenue += itemRev;
+      categoryMap[category].quantity += itemQty;
+
+      if (!categoryMap[category].products[item.productId]) {
+        categoryMap[category].products[item.productId] = {
+          productId: item.productId,
+          productName: item.productName || prod?.name || 'Məhsul',
+          quantity: 0,
+          revenue: 0,
+          unitPrice: Number(item.unitPrice) || prod?.salePrice || 0,
+        };
+      }
+
+      categoryMap[category].products[item.productId].quantity += itemQty;
+      categoryMap[category].products[item.productId].revenue += itemRev;
+    }
+  }
+
+  const categories: CategoryBreakdownItem[] = Object.values(categoryMap)
+    .map(cat => {
+      const catRevenue = Math.round(cat.revenue * 100) / 100;
+      const percentageOfTotal =
+        totalRevenue > 0 ? Math.round((catRevenue / totalRevenue) * 1000) / 10 : 0;
+
+      const prods: CategoryProductStat[] = Object.values(cat.products)
+        .map(p => ({
+          ...p,
+          revenue: Math.round(p.revenue * 100) / 100,
+          percentageOfCategory:
+            catRevenue > 0 ? Math.round((p.revenue / catRevenue) * 1000) / 10 : 0,
+        }))
+        .sort((a, b) => b.revenue - a.revenue);
+
+      return {
+        categoryName: cat.categoryName,
+        revenue: catRevenue,
+        quantity: cat.quantity,
+        totalRevenue: catRevenue,
+        totalQuantity: cat.quantity,
+        percentageOfTotal,
+        products: prods,
+      };
+    })
+    .sort((a, b) => b.revenue - a.revenue);
+
+  return {
+    totalRevenue: Math.round(totalRevenue * 100) / 100,
+    totalQuantity,
+    categories,
+  };
 }
 
 /**

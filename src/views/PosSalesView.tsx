@@ -15,6 +15,9 @@ import {
   Check,
   User,
   Download,
+  Wallet,
+  Coins,
+  X,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { PaymentType, Product, Sale } from '../types';
@@ -43,6 +46,8 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     purchases,
     sales,
     debts,
+    customerAccounts,
+    depositToCustomer,
     addSale,
     confirmSale,
     confirmDaySales,
@@ -57,6 +62,12 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentType, setPaymentType] = useState<PaymentType>('naqd');
   const [debtorName, setDebtorName] = useState('');
+  const [selectedCustomerAccount, setSelectedCustomerAccount] = useState<string>('Əli');
+  const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
+  const [depositName, setDepositName] = useState('');
+  const [depositAmount, setDepositAmount] = useState<number>(10);
+  const [depositPaymentType, setDepositPaymentType] = useState<'naqd' | 'kart' | 'pos'>('naqd');
+  const [depositNote, setDepositNote] = useState('');
   const [customDate, setCustomDate] = useState(getTodayISODate());
   const [customTime, setCustomTime] = useState(getCurrentTimeHHMM());
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -149,15 +160,40 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
   // Submit Sale
   const handleCompleteSale = () => {
     if (cart.length === 0) return;
+
     if (paymentType === 'borc' && !debtorName.trim()) {
       alert('Zəhmət olmasa borclunun adını daxil edin!');
       return;
     }
 
+    if (paymentType === 'balans') {
+      const custName = selectedCustomerAccount.trim();
+      if (!custName) {
+        alert('Zəhmət olmasa müştəri hesabını seçin!');
+        return;
+      }
+      const existing = customerAccounts.find(c => c.name.toLowerCase() === custName.toLowerCase());
+      if (!existing) {
+        alert(`"${custName}" adlı müştəri hesabı tapılmadı!`);
+        return;
+      }
+      if (existing.balance < cartTotal) {
+        alert(
+          `Balansda kifayət qədər vəsait yoxdur! Cari balans: ${formatAZN(existing.balance)}, Tələb olunan: ${formatAZN(cartTotal)}`
+        );
+        return;
+      }
+    }
+
     const res = addSale({
       items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity })),
       paymentType,
-      debtorName: paymentType === 'borc' ? debtorName.trim() : undefined,
+      debtorName:
+        paymentType === 'borc'
+          ? debtorName.trim()
+          : paymentType === 'balans'
+          ? selectedCustomerAccount.trim()
+          : undefined,
       customDate,
       customTime,
     });
@@ -167,6 +203,21 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     } else {
       alert(res.error || 'Satış tamamlanmadı');
     }
+  };
+
+  const handleQuickDepositSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = depositName.trim();
+    if (!name || depositAmount <= 0) {
+      alert('Ad və düzgün məbləğ daxil edin!');
+      return;
+    }
+    depositToCustomer(name, depositAmount, depositPaymentType, depositNote);
+    setSelectedCustomerAccount(name);
+    setPaymentType('balans');
+    setIsDepositModalOpen(false);
+    setDepositName('');
+    setDepositNote('');
   };
 
   // Filtered products for POS grid
@@ -457,12 +508,12 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
               </div>
             </div>
 
-            {/* Payment Method Selector (Nağd, Kart, POS, Borc) */}
+            {/* Payment Method Selector (Nağd, Kart, POS, Balans, Borc) */}
             <div className="space-y-2">
               <label className="block text-xs font-bold text-zinc-300 uppercase tracking-wider">
                 Ödəniş Növü
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 <button
                   type="button"
                   onClick={() => setPaymentType('naqd')}
@@ -504,6 +555,19 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
                 <button
                   type="button"
+                  onClick={() => setPaymentType('balans')}
+                  className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all ${
+                    paymentType === 'balans'
+                      ? 'bg-amber-600 text-white border-amber-500 shadow-md shadow-amber-950'
+                      : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:bg-zinc-800'
+                  }`}
+                >
+                  <Wallet className="w-4 h-4 text-amber-400" />
+                  <span>Balans (Depozit)</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setPaymentType('borc')}
                   className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center gap-2 transition-all ${
                     paymentType === 'borc'
@@ -516,6 +580,86 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                 </button>
               </div>
             </div>
+
+            {/* If BALANS (Müştəri Depozit Balansı) */}
+            {paymentType === 'balans' && (
+              <div className="space-y-3 p-3.5 rounded-2xl bg-zinc-950 border border-amber-800/60 animate-in fade-in">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Wallet className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Müştəri Hesabı</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDepositName(selectedCustomerAccount || '');
+                      setIsDepositModalOpen(true);
+                    }}
+                    className="text-[11px] font-bold text-amber-400 hover:text-amber-300 underline flex items-center gap-1"
+                  >
+                    <span>+ Balans Artır</span>
+                  </button>
+                </div>
+
+                {/* Customer Selector / Dropdown */}
+                <select
+                  value={selectedCustomerAccount}
+                  onChange={e => setSelectedCustomerAccount(e.target.value)}
+                  className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-700 bg-zinc-900 text-white font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  <option value="">-- Müştəri Hesabı Seçin --</option>
+                  {customerAccounts.map(c => (
+                    <option key={c.id} value={c.name}>
+                      {c.name} — Balans: {formatAZN(c.balance)}
+                    </option>
+                  ))}
+                </select>
+
+                {/* Short, concise balance overview */}
+                {(() => {
+                  const cust = customerAccounts.find(
+                    c => c.name.toLowerCase() === selectedCustomerAccount.trim().toLowerCase()
+                  );
+                  if (!cust) {
+                    return (
+                      <p className="text-[11px] text-zinc-500">
+                        Siyahıdan müştəri seçin və ya "+ Balans Artır" ilə yeni depozit hesabı açın.
+                      </p>
+                    );
+                  }
+                  const remainingAfterSale = Math.round((cust.balance - cartTotal) * 100) / 100;
+                  const hasEnough = remainingAfterSale >= 0;
+
+                  return (
+                    <div className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-800 space-y-1.5 text-xs">
+                      <div className="flex justify-between items-center text-zinc-300">
+                        <span>Cari Depozit Balansı:</span>
+                        <strong className="font-mono text-white text-sm">{formatAZN(cust.balance)}</strong>
+                      </div>
+                      <div className="flex justify-between items-center text-zinc-400 text-[11px]">
+                        <span>Çıxılacaq Məbləğ:</span>
+                        <span className="font-mono text-amber-400 font-bold">− {formatAZN(cartTotal)}</span>
+                      </div>
+                      <div className="pt-1.5 border-t border-zinc-800 flex justify-between items-center">
+                        <span className="font-bold text-zinc-200">Qalacaq Balans:</span>
+                        <span
+                          className={`font-mono font-black ${
+                            hasEnough ? 'text-emerald-400' : 'text-red-500'
+                          }`}
+                        >
+                          {formatAZN(remainingAfterSale)}
+                        </span>
+                      </div>
+                      {!hasEnough && (
+                        <p className="text-[11px] text-red-400 font-bold pt-1">
+                          Xəbərdarlıq: Balansda vəsait çatışmır! Əvvəlcə balans artırın.
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
 
             {/* If BORC, Customer Name Input with real-time existing debt alert */}
             {paymentType === 'borc' && (
@@ -851,6 +995,123 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
           if (onNavigateToDebts) onNavigateToDebts();
         }}
       />
+
+      {/* Quick Deposit Top-up Modal */}
+      {isDepositModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md p-5 sm:p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-amber-600 text-white flex items-center justify-center">
+                  <Coins className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Müştəri Balansını Artır</h3>
+                  <p className="text-xs text-zinc-400">Depozit daxil etmə (məs: Əli 10 AZN verir)</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDepositModalOpen(false)}
+                className="w-8 h-8 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-400 flex items-center justify-center"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleQuickDepositSubmit} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-zinc-300 font-bold mb-1">Müştərinin Adı *</label>
+                <input
+                  type="text"
+                  required
+                  value={depositName}
+                  onChange={e => setDepositName(e.target.value)}
+                  placeholder="məs: Əli"
+                  className="w-full px-3 py-2 rounded-xl border border-zinc-700 bg-zinc-950 text-white font-semibold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-zinc-300 font-bold mb-1">Depozit Məbləği (AZN) *</label>
+                <input
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  required
+                  value={depositAmount}
+                  onChange={e => setDepositAmount(Number(e.target.value) || 0)}
+                  className="w-full px-3 py-2 rounded-xl border border-zinc-700 bg-zinc-950 text-white font-mono font-bold text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+                {/* Quick amount shortcuts */}
+                <div className="flex gap-2 mt-2">
+                  {[5, 10, 20, 50].map(amt => (
+                    <button
+                      key={amt}
+                      type="button"
+                      onClick={() => setDepositAmount(amt)}
+                      className={`flex-1 py-1 rounded-lg border text-[11px] font-bold ${
+                        depositAmount === amt
+                          ? 'bg-amber-600 text-white border-amber-500'
+                          : 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700'
+                      }`}
+                    >
+                      {amt} AZN
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-zinc-300 font-bold mb-1">Ödəniş Metodu</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['naqd', 'kart', 'pos'] as const).map(pt => (
+                    <button
+                      key={pt}
+                      type="button"
+                      onClick={() => setDepositPaymentType(pt)}
+                      className={`py-1.5 rounded-lg border text-[11px] font-bold uppercase transition-all ${
+                        depositPaymentType === pt
+                          ? 'bg-amber-600 text-white border-amber-500 shadow-sm'
+                          : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:bg-zinc-800'
+                      }`}
+                    >
+                      {pt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-zinc-300 font-bold mb-1">Qeyd (İstəyə bağlı)</label>
+                <input
+                  type="text"
+                  value={depositNote}
+                  onChange={e => setDepositNote(e.target.value)}
+                  placeholder="məs: Su üçün qabaqcadan depozit"
+                  className="w-full px-3 py-2 rounded-xl border border-zinc-700 bg-zinc-950 text-white"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDepositModalOpen(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-zinc-700 text-zinc-300 hover:bg-zinc-800 font-bold transition-colors"
+                >
+                  Ləğv et
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold transition-all shadow-md shadow-amber-600/30"
+                >
+                  Balansı Artır ({depositAmount} AZN)
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

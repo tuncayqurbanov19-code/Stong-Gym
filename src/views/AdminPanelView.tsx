@@ -50,10 +50,12 @@ export const AdminPanelView: React.FC = () => {
     purchases,
     sales,
     debts,
+    customerAccounts,
     dailyReports,
     expenses,
     auditLogs,
     resetToSampleData,
+    resetToOriginalBackup,
     clearAllTransactions,
     restoreFromBackup,
     notificationPermission,
@@ -175,6 +177,7 @@ export const AdminPanelView: React.FC = () => {
       purchases,
       sales,
       debts,
+      customerAccounts,
       dailyReports,
       expenses,
     };
@@ -698,18 +701,35 @@ export const AdminPanelView: React.FC = () => {
               Məhsulları və istifadəçiləri toxunulmaz saxlayaraq, bütün satış, borc, mal qəbulu və gündəlik hesabatları sıfırlayın. Real satışlarınızı təmiz başlamaq üçün istifadə edin.
             </p>
 
-            <button
-              onClick={() => {
-                if (confirm('Bütün satışları, borcları, mal qəbullarını və hesabatları sıfırlamaq istəyirsiniz? (Məhsullar və istifadəçilər saxlanılacaq)')) {
-                  clearAllTransactions();
-                  alert('Bütün satış və əməliyyat məlumatları sıfırlandı!');
-                }
-              }}
-              className="px-5 py-2.5 bg-red-950 hover:bg-red-900 text-red-200 border border-red-800 font-bold text-xs rounded-xl transition-colors flex items-center gap-2"
-            >
-              <Trash className="w-4 h-4 text-red-400" />
-              <span>Bütün Satış və Hesabatları Sıfırla (0-la)</span>
-            </button>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm('11.11.2026 tarixli orijinal sistem məlumatlarını (12 məhsul, Əlinin 10 AZN balansı, Muradın 0.60 AZN borcu, admin2025 şifrəsi) tam bərpa etmək istəyirsiniz?')) {
+                    resetToOriginalBackup();
+                    alert('11.11.2026 tarixli orijinal baza tam bərpa edildi!');
+                  }
+                }}
+                className="px-5 py-2.5 bg-amber-950 hover:bg-amber-900 text-amber-200 border border-amber-800 font-bold text-xs rounded-xl transition-colors flex items-center gap-2 shadow-sm"
+              >
+                <RotateCcw className="w-4 h-4 text-amber-400" />
+                <span>11.11.2026 Orijinal Bazasını Bərpa Et</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm('Bütün satışları, borcları, mal qəbullarını və hesabatları sıfırlamaq istəyirsiniz? (Məhsullar və istifadəçilər saxlanılacaq)')) {
+                    clearAllTransactions();
+                    alert('Bütün satış və əməliyyat məlumatları sıfırlandı!');
+                  }
+                }}
+                className="px-5 py-2.5 bg-red-950 hover:bg-red-900 text-red-200 border border-red-800 font-bold text-xs rounded-xl transition-colors flex items-center gap-2"
+              >
+                <Trash className="w-4 h-4 text-red-400" />
+                <span>Bütün Satış və Hesabatları Sıfırla (0-la)</span>
+              </button>
+            </div>
           </div>
 
           {/* Excel Export Strip */}

@@ -43,7 +43,7 @@ export interface CartItem {
   unitPrice: number;
 }
 
-export type PaymentType = 'naqd' | 'kart' | 'pos' | 'borc';
+export type PaymentType = 'naqd' | 'kart' | 'pos' | 'borc' | 'balans';
 
 export interface SaleItem {
   productId: string;
@@ -91,6 +91,30 @@ export interface DebtRecord {
   saleId?: string;
   notes?: string;
   payments: DebtPayment[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CustomerTransaction {
+  id: string;
+  type: 'deposit' | 'charge'; // deposit = balansa pul qoyuldu (+), charge = balansdan su/məhsul çıxıldı (-)
+  amount: number;
+  date: string;
+  time: string;
+  note?: string;
+  saleId?: string;
+  createdBy?: string;
+}
+
+export interface CustomerAccount {
+  id: string;
+  name: string;
+  phone?: string;
+  balance: number; // Cari aktiv depozit balansı (müsbət məbləğ)
+  totalDeposited: number; // İndiyə qədər ödədiyi ümumi depozit cəmi
+  totalSpent: number; // Balansından çıxılan ümumi xərc cəmi
+  notes?: string;
+  transactions: CustomerTransaction[];
   createdAt: string;
   updatedAt: string;
 }
