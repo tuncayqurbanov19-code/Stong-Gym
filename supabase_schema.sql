@@ -339,6 +339,8 @@ VALUES (
 ON CONFLICT (id) DO NOTHING;
 
 -- İndekslər
+CREATE INDEX IF NOT EXISTS idx_products_barcode ON public.products(barcode);
+CREATE INDEX IF NOT EXISTS idx_products_barcode_lower ON public.products(lower(trim(barcode)));
 CREATE INDEX IF NOT EXISTS idx_debt_payments_debt_id ON public.debt_payments(debt_id);
 CREATE INDEX IF NOT EXISTS idx_debt_payments_paid_at ON public.debt_payments(paid_at);
 CREATE INDEX IF NOT EXISTS idx_debt_payments_received_by ON public.debt_payments(received_by);

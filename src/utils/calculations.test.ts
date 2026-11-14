@@ -18,6 +18,9 @@ import {
   findProductByBarcode,
   hasLongerBarcodePrefix,
   isRapidScanSequence,
+  buildBarcodeIndex,
+  lookupBarcodeInIndex,
+  hasLongerBarcodePrefixInIndex,
 } from './barcodeUtils';
 import { Product, PurchaseIntake, Sale, DebtRecord, DailyReport } from '../types';
 
@@ -462,5 +465,15 @@ test('POS barcode scanner matching supports exact, whitespace/newline trim, lead
   // Rapid HID hardware scanner timing vs slow manual typing
   assert.equal(isRapidScanSequence([18, 22, 15, 25, 19]), true);
   assert.equal(isRapidScanSequence([160, 210, 140, 195]), false);
+
+  // O(1) barcode index verification
+  const idx = buildBarcodeIndex(sampleProducts);
+  assert.equal(lookupBarcodeInIndex(idx, '47600106\r\n')?.id, 'p-1');
+  assert.equal(lookupBarcodeInIndex(idx, '047600106')?.id, 'p-1');
+  assert.equal(lookupBarcodeInIndex(idx, '05su')?.id, 'p-2');
+  assert.equal(lookupBarcodeInIndex(idx, 'unknown-code'), undefined);
+  assert.equal(hasLongerBarcodePrefixInIndex(idx, '10', 'p-3'), true);
+  assert.equal(hasLongerBarcodePrefixInIndex(idx, '47600106', 'p-1'), false);
 });
+
 

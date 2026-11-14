@@ -10,6 +10,87 @@ export function normalizeBarcode(raw: string): string {
     .toLowerCase();
 }
 
+export interface BarcodeIndex {
+  exactMap: Map<string, Product>;
+  compactMap: Map<string, Product>;
+  strippedMap: Map<string, Product>;
+  normalizedCodes: Array<{ id: string; code: string }>;
+}
+
+/**
+ * Sürətli O(1) axtarış üçün məhsul barkodlarını bir dəfə indeksləyir.
+ */
+export function buildBarcodeIndex(products: Product[]): BarcodeIndex {
+  const exactMap = new Map<string, Product>();
+  const compactMap = new Map<string, Product>();
+  const strippedMap = new Map<string, Product>();
+  const normalizedCodes: Array<{ id: string; code: string }> = [];
+
+  for (const product of products) {
+    const clean = normalizeBarcode(product.barcode || '');
+    if (!clean) continue;
+
+    if (!exactMap.has(clean)) {
+      exactMap.set(clean, product);
+    }
+
+    const compact = clean.replace(/\s+/g, '');
+    if (compact) {
+      if (!compactMap.has(compact)) {
+        compactMap.set(compact, product);
+      }
+      normalizedCodes.push({ id: product.id, code: compact });
+
+      const stripped = compact.replace(/^0+/, '');
+      if (stripped && !strippedMap.has(stripped)) {
+        strippedMap.set(stripped, product);
+      }
+    }
+  }
+
+  return { exactMap, compactMap, strippedMap, normalizedCodes };
+}
+
+/**
+ * Əvvəlcədən qurulmuş indeksdən O(1) sürətilə barkoda uyğun məhsulu tapır.
+ */
+export function lookupBarcodeInIndex(index: BarcodeIndex, rawCode: string): Product | undefined {
+  const clean = normalizeBarcode(rawCode);
+  if (!clean) return undefined;
+
+  const exact = index.exactMap.get(clean);
+  if (exact) return exact;
+
+  const compact = clean.replace(/\s+/g, '');
+  const compactMatch = index.compactMap.get(compact);
+  if (compactMatch) return compactMatch;
+
+  const stripped = compact.replace(/^0+/, '');
+  if (stripped) {
+    return index.strippedMap.get(stripped);
+  }
+
+  return undefined;
+}
+
+/**
+ * İndeks üzərindən daha uzun prefiks olub-olmadığını yoxlayır.
+ */
+export function hasLongerBarcodePrefixInIndex(
+  index: BarcodeIndex,
+  rawCode: string,
+  matchedId: string
+): boolean {
+  const clean = normalizeBarcode(rawCode).replace(/\s+/g, '');
+  if (!clean) return false;
+  for (const entry of index.normalizedCodes) {
+    if (entry.id !== matchedId && entry.code.length > clean.length && entry.code.startsWith(clean)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Verilmiş barkoda uyğun məhsulu tapır:
  * 1. Dəqiq (case-insensitive) uyğunluq

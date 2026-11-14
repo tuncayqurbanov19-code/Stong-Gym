@@ -24,6 +24,8 @@ ALTER TABLE public.debts
   ADD COLUMN IF NOT EXISTS debtor_phone TEXT;
 
 -- Performans indeksləri
+CREATE INDEX IF NOT EXISTS idx_products_barcode ON public.products(barcode);
+CREATE INDEX IF NOT EXISTS idx_products_barcode_lower ON public.products(lower(trim(barcode)));
 CREATE INDEX IF NOT EXISTS idx_sales_date ON public.sales(date);
 CREATE INDEX IF NOT EXISTS idx_sales_payment_type ON public.sales(payment_type);
 CREATE INDEX IF NOT EXISTS idx_debts_status_remaining ON public.debts(status, remaining_amount);

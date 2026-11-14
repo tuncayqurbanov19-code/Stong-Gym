@@ -24,6 +24,9 @@ import {
   Edit3,
   AlertTriangle,
   ScanBarcode,
+  CameraOff,
+  Lock,
+  Unlock,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { PaymentType, Product, Sale } from '../types';
@@ -35,16 +38,17 @@ import {
   getCurrentMonthKey,
   getMonthLabelAZ,
 } from '../utils/dateUtils';
-import { calculateProductStock } from '../utils/stockCalculations';
+import { calculateAllProductStocks } from '../utils/stockCalculations';
 import { calculateFinancialMetricsForRange, checkCustomerDebt } from '../utils/financialCalculations';
 import {
-  findProductByBarcode,
-  hasLongerBarcodePrefix,
+  buildBarcodeIndex,
+  hasLongerBarcodePrefixInIndex,
   isRapidScanSequence,
+  lookupBarcodeInIndex,
   normalizeBarcode,
 } from '../utils/barcodeUtils';
 import { playAlertSound, unlockAudioContext } from '../utils/notificationUtils';
-import { BarcodeScannerModal } from '../components/BarcodeScannerModal';
+import { InlineBarcodeCamera } from '../components/InlineBarcodeCamera';
 import { DebtWarningModal } from '../components/DebtWarningModal';
 import { exportSalesToCSV } from '../utils/exportUtils';
 
@@ -90,16 +94,24 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
   const [depositNote, setDepositNote] = useState('');
   const [customDate, setCustomDate] = useState(todayISO);
   const [customTime, setCustomTime] = useState(getCurrentTimeHHMM());
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [isCameraActive, setIsCameraActive] = useState(false);
   const [barcodeInput, setBarcodeInput] = useState('');
-  const [scannerFocusLock, setScannerFocusLock] = useState(false);
+  const [scannerFocusLock, setScannerFocusLock] = useState(true);
+  const [scannerFocused, setScannerFocused] = useState(false);
+  const [lastAddedProductId, setLastAddedProductId] = useState<string | null>(null);
   const [lastScanFeedback, setLastScanFeedback] = useState<{
     status: 'success' | 'error';
     message: string;
     barcode: string;
   } | null>(null);
   const scannerInputRef = useRef<HTMLInputElement | null>(null);
+  const cartRef = useRef<CartItem[]>(cart);
+  cartRef.current = cart;
+  const scannerFocusLockRef = useRef<boolean>(scannerFocusLock);
+  scannerFocusLockRef.current = scannerFocusLock;
   const scannerAutoTimerRef = useRef<number | null>(null);
+  const blurRefocusTimerRef = useRef<number | null>(null);
+  const lastAddedTimerRef = useRef<number | null>(null);
   const scannerIntervalsRef = useRef<{ lastTime: number; intervals: number[] }>({
     lastTime: 0,
     intervals: [],
@@ -109,7 +121,11 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     intervals: [],
   });
   const searchAutoTimerRef = useRef<number | null>(null);
-  const lastHandledScanRef = useRef<{ code: string; time: number }>({ code: '', time: 0 });
+  const lastHandledScanRef = useRef<{ code: string; time: number; source: string }>({
+    code: '',
+    time: 0,
+    source: '',
+  });
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [confirmDeleteSaleId, setConfirmDeleteSaleId] = useState<string | null>(null);
@@ -142,6 +158,13 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     [products]
   );
 
+  // O(1) Barkod indeksi və Stok xəritəsi (ardıcıl skan zamanı gecikmə və donmanı sıfırlayır)
+  const barcodeIndex = useMemo(() => buildBarcodeIndex(products), [products]);
+  const stockMap = useMemo(
+    () => calculateAllProductStocks(products, purchases, sales, settings.minStockThreshold),
+    [products, purchases, sales, settings.minStockThreshold]
+  );
+
   // Known debtor names & phones for quick autofill
   const knownDebtors = useMemo(() => {
     const map = new Map<string, string>();
@@ -155,40 +178,74 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
   }, [debts]);
 
   const getAvailableStock = (product: Product): number => {
-    return calculateProductStock(product, purchases, sales, settings.minStockThreshold).activeStock;
+    return stockMap[product.id]?.activeStock ?? Number(product.initialStock) ?? 0;
   };
 
-  // Add product to cart with stock check
-  const addToCart = (product: Product) => {
+  const restoreScannerFocus = (force = false) => {
+    if (typeof window === 'undefined') return;
+    if (!force && !scannerFocusLockRef.current) return;
+    if (activeSubTab !== 'pos' || isDepositModalOpen || editingSale || isDebtModalOpen) return;
+
+    window.requestAnimationFrame(() => {
+      const el = scannerInputRef.current;
+      if (!el) return;
+      const active = document.activeElement as HTMLElement | null;
+      const activeTag = active?.tagName?.toLowerCase();
+      // Başqa giriş xanasında (endirim, axtarış, borclu adı və s.) yazı yazılırsa fokus oğurlanmasın
+      if (!force && active && active !== el && (activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select')) {
+        return;
+      }
+      el.focus({ preventScroll: true });
+    });
+  };
+
+  const markProductHighlighted = (productId: string) => {
+    setLastAddedProductId(productId);
+    if (lastAddedTimerRef.current) {
+      window.clearTimeout(lastAddedTimerRef.current);
+    }
+    lastAddedTimerRef.current = window.setTimeout(() => {
+      setLastAddedProductId(prev => (prev === productId ? null : prev));
+    }, 1200);
+  };
+
+  // Add product to cart with synchronous cartRef update to prevent race conditions during rapid consecutive scans
+  const addToCart = (product: Product, shouldRefocusScanner = true): boolean => {
     const available = getAvailableStock(product);
     if (available <= 0) {
       showToast('error', `"${product.name}" anbarda bitib (Stok: ${available}).`);
-      return;
+      return false;
     }
 
-    const currentInCart = cart.find(item => item.product.id === product.id)?.quantity || 0;
+    const currentCart = cartRef.current;
+    const currentInCart = currentCart.find(item => item.product.id === product.id)?.quantity || 0;
     if (currentInCart + 1 > available) {
       showToast('error', `"${product.name}" üçün maksimum ${available} ədəd satıla bilər.`);
-      return;
+      return false;
     }
 
-    setCart(prev => {
-      const existing = prev.find(item => item.product.id === product.id);
-      if (existing) {
-        return prev.map(item =>
+    const existing = currentCart.find(item => item.product.id === product.id);
+    const nextCart = existing
+      ? currentCart.map(item =>
           item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-        );
-      }
-      return [...prev, { product, quantity: 1 }];
-    });
+        )
+      : [...currentCart, { product, quantity: 1 }];
+
+    cartRef.current = nextCart;
+    setCart(nextCart);
+    markProductHighlighted(product.id);
+    if (shouldRefocusScanner) {
+      restoreScannerFocus();
+    }
+    return true;
   };
 
   const updateQuantity = (productId: string, delta: number) => {
     const prod = products.find(p => p.id === productId);
     const available = prod ? getAvailableStock(prod) : 99999;
 
-    setCart(prev =>
-      prev
+    setCart(prev => {
+      const next = prev
         .map(item => {
           if (item.product.id === productId) {
             const newQty = item.quantity + delta;
@@ -201,21 +258,33 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
           }
           return item;
         })
-        .filter(Boolean) as CartItem[]
-    );
+        .filter(Boolean) as CartItem[];
+      cartRef.current = next;
+      return next;
+    });
+    restoreScannerFocus();
   };
 
   const removeFromCart = (productId: string) => {
-    setCart(prev => prev.filter(item => item.product.id !== productId));
+    setCart(prev => {
+      const next = prev.filter(item => item.product.id !== productId);
+      cartRef.current = next;
+      return next;
+    });
+    restoreScannerFocus();
   };
 
   const clearCart = () => {
+    cartRef.current = [];
     setCart([]);
     setDebtorName('');
     setDebtorPhone('');
     setDiscountInput('');
     setPaymentType('naqd');
+    setBarcodeInput('');
+    setLastAddedProductId(null);
     lastWarnedDebtorRef.current = '';
+    restoreScannerFocus();
   };
 
   // Cart total calculations
@@ -256,23 +325,23 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     const clean = normalizeBarcode(rawCode);
     if (!clean) return false;
 
-    // Prevent double-triggering on rapid Enter + timer/change in the same 180ms window
+    // Transport qatında (auto-timer + Enter və ya HID + input) < 80ms təkrar atəşin qarşısını al;
+    // lakin eyni məhsulu ardıcıl ikinci dəfə skan edəndə (>= 80ms) dərhal miqdarı artırır.
     const now = Date.now();
     if (
       source !== 'camera' &&
       lastHandledScanRef.current.code === clean &&
-      now - lastHandledScanRef.current.time < 180
+      now - lastHandledScanRef.current.time < 80
     ) {
       return false;
     }
-    lastHandledScanRef.current = { code: clean, time: now };
+    lastHandledScanRef.current = { code: clean, time: now, source };
 
-    const found = findProductByBarcode(products, clean);
+    const found = lookupBarcodeInIndex(barcodeIndex, clean);
     if (found) {
       const available = getAvailableStock(found);
-      const currentInCart = cart.find(item => item.product.id === found.id)?.quantity || 0;
-      addToCart(found);
-      if (available <= 0 || currentInCart + 1 > available) {
+      const added = addToCart(found, source !== 'search');
+      if (!added) {
         try {
           playAlertSound('warning');
         } catch {
@@ -286,6 +355,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
         return false;
       }
 
+      const updatedQty = cartRef.current.find(i => i.product.id === found.id)?.quantity || 1;
       try {
         playAlertSound('success');
       } catch {
@@ -294,9 +364,8 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
       setLastScanFeedback({
         status: 'success',
         barcode: found.barcode,
-        message: `"${found.name}" səbətə əlavə olundu (${formatAZN(found.salePrice)})`,
+        message: `${found.name} × ${updatedQty} (${formatAZN(found.salePrice * updatedQty)})`,
       });
-      showToast('success', `Skaner: "${found.name}" səbətə əlavə olundu.`);
       return true;
     } else {
       try {
@@ -314,8 +383,24 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     }
   };
 
+  const processScannedBarcodeRef = useRef(processScannedBarcode);
+  processScannedBarcodeRef.current = processScannedBarcode;
+
   const handleBarcodeScanned = (barcode: string) => {
-    processScannedBarcode(barcode, 'camera');
+    processScannedBarcodeRef.current(barcode, 'camera');
+  };
+
+  const submitScannerInputImmediate = (rawVal: string) => {
+    if (scannerAutoTimerRef.current) {
+      window.clearTimeout(scannerAutoTimerRef.current);
+      scannerAutoTimerRef.current = null;
+    }
+    setBarcodeInput('');
+    scannerIntervalsRef.current = { lastTime: 0, intervals: [] };
+    if (normalizeBarcode(rawVal)) {
+      processScannedBarcode(rawVal, 'scanner');
+    }
+    restoreScannerFocus(true);
   };
 
   // Dedicated scanner input change handler (auto-detects paste, rapid HID scan without Enter, or unambiguous exact barcode)
@@ -337,44 +422,48 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     const clean = normalizeBarcode(nextVal);
     if (!clean) return;
 
-    const matched = findProductByBarcode(products, clean);
+    const matched = lookupBarcodeInIndex(barcodeIndex, clean);
     const rapid = isRapidScanSequence(scannerIntervalsRef.current.intervals);
 
-    // If matched and either scanned rapidly or no other barcode has this as a prefix, auto-add after a brief settle pause
     if (matched) {
-      const hasLonger = hasLongerBarcodePrefix(products, clean, matched.id);
-      const delay = rapid ? 90 : hasLonger ? 450 : 180;
+      const hasLonger = hasLongerBarcodePrefixInIndex(barcodeIndex, clean, matched.id);
+      const delay = rapid ? 60 : hasLonger ? 380 : 120;
       scannerAutoTimerRef.current = window.setTimeout(() => {
-        processScannedBarcode(nextVal, 'scanner');
         setBarcodeInput('');
         scannerIntervalsRef.current = { lastTime: 0, intervals: [] };
+        processScannedBarcodeRef.current(nextVal, 'scanner');
+        restoreScannerFocus(true);
       }, delay);
     } else if (rapid && clean.length >= 4) {
-      // Rapid hardware scan without Enter suffix -> flush after short idle pause to show not-found feedback
+      // Rapid hardware scan without Enter suffix -> flush quickly
       scannerAutoTimerRef.current = window.setTimeout(() => {
-        processScannedBarcode(nextVal, 'scanner');
         setBarcodeInput('');
         scannerIntervalsRef.current = { lastTime: 0, intervals: [] };
-      }, 220);
+        processScannedBarcodeRef.current(nextVal, 'scanner');
+        restoreScannerFocus(true);
+      }, 170);
     }
   };
 
-  // Keep scanner focus when lock is enabled
+  // Keep scanner permanently ready when on POS tab and focus lock is ON
   useEffect(() => {
-    if (scannerFocusLock && activeSubTab === 'pos' && !isScannerOpen && !isDepositModalOpen && !editingSale && !isDebtModalOpen) {
-      scannerInputRef.current?.focus();
+    if (scannerFocusLock && activeSubTab === 'pos' && !isDepositModalOpen && !editingSale && !isDebtModalOpen) {
+      restoreScannerFocus();
     }
-  }, [scannerFocusLock, activeSubTab, isScannerOpen, isDepositModalOpen, editingSale, isDebtModalOpen, cart.length]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scannerFocusLock, activeSubTab, isDepositModalOpen, editingSale, isDebtModalOpen]);
 
   // Cleanup timers on unmount
   useEffect(() => {
     return () => {
       if (scannerAutoTimerRef.current) window.clearTimeout(scannerAutoTimerRef.current);
       if (searchAutoTimerRef.current) window.clearTimeout(searchAutoTimerRef.current);
+      if (blurRefocusTimerRef.current) window.clearTimeout(blurRefocusTimerRef.current);
+      if (lastAddedTimerRef.current) window.clearTimeout(lastAddedTimerRef.current);
     };
   }, []);
 
-  // Hardware USB/Bluetooth keyboard-wedge barcode scanner listener anywhere on POS tab
+  // Hardware USB/Bluetooth keyboard-wedge barcode scanner listener anywhere on POS tab (even while inline camera is open)
   const scanBufferRef = useRef<{ chars: string; lastTime: number; intervals: number[]; flushTimer: number | null }>({
     chars: '',
     lastTime: 0,
@@ -382,7 +471,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     flushTimer: null,
   });
   useEffect(() => {
-    if (activeSubTab !== 'pos' || isScannerOpen || isDepositModalOpen || editingSale || isDebtModalOpen) return;
+    if (activeSubTab !== 'pos' || isDepositModalOpen || editingSale || isDebtModalOpen) return;
 
     const flushBuffer = (requireRapid: boolean) => {
       const buf = scanBufferRef.current.chars.trim();
@@ -394,7 +483,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
         scanBufferRef.current.flushTimer = null;
       }
       if (buf.length >= 2 && (!requireRapid || (rapid && buf.length >= 4))) {
-        processScannedBarcode(buf, 'hid');
+        processScannedBarcodeRef.current(buf, 'hid');
       }
     };
 
@@ -405,7 +494,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
       const now = Date.now();
       const gap = now - scanBufferRef.current.lastTime;
-      if (gap > 180) {
+      if (gap > 160) {
         scanBufferRef.current.chars = '';
         scanBufferRef.current.intervals = [];
       } else if (scanBufferRef.current.lastTime > 0 && e.key.length === 1) {
@@ -428,7 +517,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
         // Fallback auto-flush for scanners configured without Enter/Tab suffix
         scanBufferRef.current.flushTimer = window.setTimeout(() => {
           flushBuffer(true);
-        }, 180);
+        }, 150);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -439,7 +528,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
         scanBufferRef.current.flushTimer = null;
       }
     };
-  });
+  }, [activeSubTab, isDepositModalOpen, editingSale, isDebtModalOpen]);
 
   // Submit Sale
   const handleCompleteSale = () => {
@@ -495,6 +584,14 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
         showToast('success', msg);
         clearCart();
         setCustomTime(getCurrentTimeHHMM());
+        setLastScanFeedback(null);
+        scannerIntervalsRef.current = { lastTime: 0, intervals: [] };
+        scanBufferRef.current.chars = '';
+        scanBufferRef.current.intervals = [];
+        // Satış bitən kimi dərhal yeni müştəri üçün barkod skanerinə fokus qaytar
+        window.setTimeout(() => {
+          restoreScannerFocus(true);
+        }, 0);
       } else {
         showToast('error', res.error || 'Satış tamamlanmadı');
       }
@@ -802,100 +899,154 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Column: Product Selection Grid */}
             <div className="lg:col-span-7 xl:col-span-8 space-y-3">
-              {/* Dedicated Hardware & Manual Barcode Scanner Bar */}
-              <div className="p-2.5 sm:p-3 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-2">
-                <div className="flex flex-col sm:flex-row gap-2">
+              {/* Dedicated Hardware & Manual Barcode Scanner Bar + Optional Camera Toggle Icon */}
+              <div className="p-2.5 sm:p-3 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-2.5">
+                <div className="flex items-center gap-2">
                   <form
                     onSubmit={e => {
                       e.preventDefault();
                       if (!barcodeInput.trim()) return;
-                      if (scannerAutoTimerRef.current) {
-                        window.clearTimeout(scannerAutoTimerRef.current);
-                        scannerAutoTimerRef.current = null;
-                      }
-                      processScannedBarcode(barcodeInput, 'scanner');
-                      setBarcodeInput('');
-                      scannerIntervalsRef.current = { lastTime: 0, intervals: [] };
+                      submitScannerInputImmediate(barcodeInput);
                     }}
-                    className="relative flex-1 flex gap-2"
+                    className="relative flex-1"
                   >
-                    <div className="relative flex-1">
-                      <ScanBarcode className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-red-500" />
-                      <input
-                        ref={scannerInputRef}
-                        type="text"
-                        value={barcodeInput}
-                        onChange={e => handleScannerInputChange(e.target.value)}
-                        onKeyDown={e => {
-                          if ((e.key === 'Tab' || e.key === 'Enter') && barcodeInput.trim()) {
-                            e.preventDefault();
-                            if (scannerAutoTimerRef.current) {
-                              window.clearTimeout(scannerAutoTimerRef.current);
-                              scannerAutoTimerRef.current = null;
-                            }
-                            processScannedBarcode(barcodeInput, 'scanner');
-                            setBarcodeInput('');
-                            scannerIntervalsRef.current = { lastTime: 0, intervals: [] };
-                          }
-                        }}
-                        placeholder="Barkod skan edin və ya daxil edin (avtomatik səbətə düşür)..."
-                        aria-label="Barkod skaner girişi"
-                        className="w-full pl-10 pr-8 py-2 text-sm font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
-                      />
-                      {barcodeInput && (
+                    <ScanBarcode
+                      className={`w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 transition-colors ${
+                        scannerFocused ? 'text-emerald-500' : 'text-red-500'
+                      }`}
+                    />
+                    <input
+                      ref={scannerInputRef}
+                      type="text"
+                      value={barcodeInput}
+                      onFocus={() => {
+                        setScannerFocused(true);
+                        if (blurRefocusTimerRef.current) {
+                          window.clearTimeout(blurRefocusTimerRef.current);
+                          blurRefocusTimerRef.current = null;
+                        }
+                      }}
+                      onBlur={() => {
+                        setScannerFocused(false);
+                        if (!scannerFocusLockRef.current) return;
+                        if (blurRefocusTimerRef.current) {
+                          window.clearTimeout(blurRefocusTimerRef.current);
+                        }
+                        blurRefocusTimerRef.current = window.setTimeout(() => {
+                          restoreScannerFocus(false);
+                        }, 70);
+                      }}
+                      onChange={e => handleScannerInputChange(e.target.value)}
+                      onKeyDown={e => {
+                        if ((e.key === 'Tab' || e.key === 'Enter') && barcodeInput.trim()) {
+                          e.preventDefault();
+                          submitScannerInputImmediate(barcodeInput);
+                        }
+                      }}
+                      placeholder="Barkod skan edin — ardıcıl oxuyur, düyməyə ehtiyac yoxdur..."
+                      aria-label="Barkod skaner girişi"
+                      className={`w-full pl-10 pr-24 py-2 text-sm font-mono rounded-xl border bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 transition-all ${
+                        scannerFocused
+                          ? 'border-emerald-500/80 focus:ring-emerald-500'
+                          : 'border-zinc-300 dark:border-zinc-700 focus:ring-red-500'
+                      }`}
+                    />
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                      {barcodeInput ? (
                         <button
                           type="button"
-                          onClick={() => setBarcodeInput('')}
+                          onClick={() => {
+                            setBarcodeInput('');
+                            restoreScannerFocus(true);
+                          }}
                           aria-label="Barkodu təmizlə"
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 dark:hover:text-white"
+                          className="p-0.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-white"
                         >
                           <X className="w-4 h-4" />
                         </button>
+                      ) : (
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                            scannerFocused
+                              ? 'bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                              : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700'
+                          }`}
+                        >
+                          {scannerFocused ? 'Hazır' : 'Skaner'}
+                        </span>
                       )}
                     </div>
                   </form>
 
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setScannerFocusLock(prev => {
-                          const next = !prev;
-                          if (next) {
-                            setTimeout(() => scannerInputRef.current?.focus(), 0);
-                          }
-                          return next;
-                        });
-                      }}
-                      title="USB/Bluetooth skaner üçün fokusu avtomatik bu xanada saxla"
-                      className={`px-3 py-2 text-xs font-bold rounded-xl border transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-                        scannerFocusLock
-                          ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
-                          : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-                      }`}
-                    >
-                      <ScanBarcode className="w-3.5 h-3.5" />
-                      <span>{scannerFocusLock ? 'Skaner Kilidli' : 'Fokusu Saxla'}</span>
-                    </button>
+                  {/* Auto-focus lock button */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setScannerFocusLock(prev => {
+                        const next = !prev;
+                        scannerFocusLockRef.current = next;
+                        if (next) {
+                          window.setTimeout(() => restoreScannerFocus(true), 0);
+                        }
+                        return next;
+                      });
+                    }}
+                    title={
+                      scannerFocusLock
+                        ? 'Skaner daim hazır vəziyyətdədir (kilidi açmaq üçün klikləyin)'
+                        : 'Skaner fokus kilidini aktivləşdir'
+                    }
+                    aria-label="Skaner fokus kilidi"
+                    aria-pressed={scannerFocusLock}
+                    className={`p-2.5 sm:px-3 sm:py-2 text-xs font-bold rounded-xl border transition-colors whitespace-nowrap flex items-center gap-1.5 shrink-0 ${
+                      scannerFocusLock
+                        ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                    }`}
+                  >
+                    {scannerFocusLock ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                    <span className="hidden sm:inline">{scannerFocusLock ? 'Daim Hazır' : 'Fokus Sərbəst'}</span>
+                  </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        unlockAudioContext();
-                        setIsScannerOpen(true);
-                      }}
-                      style={{ backgroundColor: primaryColor }}
-                      className="px-4 py-2 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shrink-0 transition-all hover:opacity-90 active:scale-95 whitespace-nowrap"
-                    >
-                      <Camera className="w-4 h-4" />
-                      <span>Barkod Oxut</span>
-                    </button>
-                  </div>
+                  {/* Small optional Camera Toggle Icon (OFF by default) */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      unlockAudioContext();
+                      setIsCameraActive(prev => !prev);
+                      restoreScannerFocus();
+                    }}
+                    aria-label={isCameraActive ? 'Kameranı bağla' : 'Kamera ilə barkod oxut'}
+                    aria-pressed={isCameraActive}
+                    title={isCameraActive ? 'Kameranı bağla' : 'Kamera ilə barkod oxut'}
+                    style={isCameraActive ? { backgroundColor: primaryColor } : undefined}
+                    className={`p-2.5 rounded-xl border flex items-center justify-center shrink-0 transition-all active:scale-95 ${
+                      isCameraActive
+                        ? 'text-white border-transparent shadow-sm'
+                        : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    }`}
+                  >
+                    {isCameraActive ? <CameraOff className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
+                  </button>
                 </div>
+
+                {/* Inline Camera Panel (only mounted/requested when user clicks camera icon) */}
+                {isCameraActive && (
+                  <InlineBarcodeCamera
+                    isActive={isCameraActive}
+                    onClose={() => {
+                      setIsCameraActive(false);
+                      restoreScannerFocus(true);
+                    }}
+                    onScan={handleBarcodeScanned}
+                    barcodeIndex={barcodeIndex}
+                    lastScanFeedback={lastScanFeedback}
+                  />
+                )}
 
                 <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
                   <span className="text-zinc-500 dark:text-zinc-400">
-                    USB/Bluetooth skaner POS-un istənilən yerində avtomatik işləyir
+                    USB/Bluetooth skaner daim aktivdir · eyni məhsul yenidən skan edildikdə sayı artır
                   </span>
                   {lastScanFeedback && (
                     <span
@@ -905,7 +1056,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                           : 'bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
                       }`}
                     >
-                      Son skan ({lastScanFeedback.barcode}): {lastScanFeedback.message}
+                      {lastScanFeedback.barcode}: {lastScanFeedback.message}
                     </span>
                   )}
                 </div>
@@ -937,28 +1088,28 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                         isRapidScanSequence(searchIntervalsRef.current.intervals)
                       ) {
                         searchAutoTimerRef.current = window.setTimeout(() => {
-                          const ok = processScannedBarcode(val, 'search');
+                          const ok = processScannedBarcodeRef.current(val, 'search');
                           if (ok) {
                             setSearchQuery('');
                           }
                           searchIntervalsRef.current = { lastTime: 0, intervals: [] };
-                        }, 160);
+                        }, 130);
                       }
                     }}
                     onKeyDown={e => {
                       if ((e.key === 'Enter' || e.key === 'Tab') && searchQuery.trim()) {
-                        const matched = findProductByBarcode(products, searchQuery);
+                        const matched = lookupBarcodeInIndex(barcodeIndex, searchQuery);
                         if (matched) {
                           e.preventDefault();
                           if (searchAutoTimerRef.current) {
                             window.clearTimeout(searchAutoTimerRef.current);
                             searchAutoTimerRef.current = null;
                           }
-                          processScannedBarcode(searchQuery, 'search');
+                          processScannedBarcodeRef.current(searchQuery, 'search');
                           setSearchQuery('');
                         } else if (e.key === 'Enter' && /^[0-9]{4,}$/.test(searchQuery.trim())) {
                           e.preventDefault();
-                          processScannedBarcode(searchQuery, 'search');
+                          processScannedBarcodeRef.current(searchQuery, 'search');
                         }
                       }
                     }}
@@ -1016,12 +1167,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 max-h-[640px] overflow-y-auto pr-1">
                   {filteredProducts.map(product => {
-                    const stock = calculateProductStock(
-                      product,
-                      purchases,
-                      sales,
-                      settings.minStockThreshold
-                    );
+                    const stock = stockMap[product.id] ?? {
+                      activeStock: Number(product.initialStock) || 0,
+                      isLowStock: false,
+                    };
                     const inCart = cart.find(i => i.product.id === product.id);
                     const isOutOfStock = stock.activeStock <= 0;
 
@@ -1112,8 +1261,15 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                 </div>
               ) : (
                 <div className="space-y-2 max-h-56 overflow-y-auto pr-1 divide-y divide-zinc-200 dark:divide-zinc-800">
-                  {cart.map(item => (
-                    <div key={item.product.id} className="pt-2 flex items-center justify-between gap-2">
+                  {cart.map(item => {
+                    const isJustScanned = lastAddedProductId === item.product.id;
+                    return (
+                    <div
+                      key={item.product.id}
+                      className={`pt-2 px-1.5 pb-1 rounded-lg flex items-center justify-between gap-2 transition-colors ${
+                        isJustScanned ? 'bg-emerald-50/90 dark:bg-emerald-950/35' : ''
+                      }`}
+                    >
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">
                           {item.product.name}
@@ -1156,7 +1312,8 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                         </button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
@@ -2160,15 +2317,6 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
           </div>
         </div>
       )}
-
-      {/* Barcode Scanner Modal */}
-      <BarcodeScannerModal
-        isOpen={isScannerOpen}
-        onClose={() => setIsScannerOpen(false)}
-        onScan={handleBarcodeScanned}
-        title="Satış Üçün Barkod Oxut"
-        allowContinuous={true}
-      />
 
       {/* Debt Warning Modal */}
       <DebtWarningModal
