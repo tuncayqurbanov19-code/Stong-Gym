@@ -49,19 +49,37 @@ export function exportProductsToCSV(products: Product[]): void {
  * Exports sales to CSV
  */
 export function exportSalesToCSV(sales: Sale[]): void {
-  const headers = ['ID', 'Tarix', 'Saat', 'Ödəniş Növü', 'Məhsullar', 'Məbləğ (AZN)', 'Borclu Adı', 'Təsdiqlənib', 'İstifadəçi'];
+  const headers = [
+    'ID',
+    'Satış Tarixi',
+    'Saat',
+    'Ödəniş Növü',
+    'Məhsullar',
+    'Ara Cəm (AZN)',
+    'Endirim (AZN)',
+    'Yekun Məbləğ (AZN)',
+    'Borclu / Müştəri',
+    'Telefon',
+    'Təsdiqlənib',
+    'Məsul',
+    'Faktiki Daxilolma',
+  ];
   const rows = sales.map(s => {
-    const itemsSummary = s.items.map(i => `${i.productName} (${i.quantity} əd.)`).join('; ');
+    const itemsSummary = s.items.map(i => `${i.productName} (${i.quantity} əd. × ${i.unitPrice})`).join('; ');
     return [
       escapeCsvField(s.id),
       escapeCsvField(formatDateAZ(s.date)),
       escapeCsvField(s.time),
       escapeCsvField(s.paymentType.toUpperCase()),
       escapeCsvField(itemsSummary),
+      escapeCsvField(s.subtotalAmount ?? s.totalAmount + (s.discountAmount || 0)),
+      escapeCsvField(s.discountAmount || 0),
       escapeCsvField(s.totalAmount),
       escapeCsvField(s.debtorName || ''),
+      escapeCsvField(s.debtorPhone || ''),
       escapeCsvField(s.isConfirmed ? 'Bəli' : 'Xeyr'),
       escapeCsvField(s.createdBy),
+      escapeCsvField(s.createdAt ? new Date(s.createdAt).toLocaleString('az-AZ') : ''),
     ];
   });
 
@@ -92,17 +110,34 @@ export function exportPurchasesToCSV(purchases: PurchaseIntake[]): void {
  * Exports debts to CSV
  */
 export function exportDebtsToCSV(debts: DebtRecord[]): void {
-  const headers = ['ID', 'Tarix', 'Borclu', 'Ümumi Məbləğ (AZN)', 'Ödənilən (AZN)', 'Qalıq Borc (AZN)', 'Status', 'Məhsullar'];
+  const headers = [
+    'ID',
+    'Yaranma Tarixi',
+    'Borclu Ad Soyad',
+    'Telefon',
+    'Ümumi Məbləğ (AZN)',
+    'Ödənilən (AZN)',
+    'Qalıq Borc (AZN)',
+    'Son Ödəniş Tarixi',
+    'Status',
+    'Məhsullar',
+  ];
   const rows = debts.map(d => {
     const itemsSummary = d.items.map(i => `${i.productName} (${i.quantity} əd.)`).join('; ');
+    const lastPay = (d.payments || [])
+      .map(p => (p.paidAt || p.date || '').split('T')[0])
+      .filter(Boolean)
+      .sort((a, b) => b.localeCompare(a))[0];
     return [
       escapeCsvField(d.id),
       escapeCsvField(formatDateAZ(d.date)),
       escapeCsvField(d.debtorName),
+      escapeCsvField(d.debtorPhone || ''),
       escapeCsvField(d.totalAmount),
       escapeCsvField(d.paidAmount),
       escapeCsvField(d.remainingAmount),
-      escapeCsvField(d.status === 'odanilib' ? 'Ödənilib' : d.status === 'qismen' ? 'Qismən ödənilib' : 'Borcdadır'),
+      escapeCsvField(lastPay ? formatDateAZ(lastPay) : '-'),
+      escapeCsvField(d.status === 'odanilib' ? 'Tam ödənilib' : d.status === 'qismen' ? 'Qismən ödənilib' : 'Aktiv'),
       escapeCsvField(itemsSummary),
     ];
   });

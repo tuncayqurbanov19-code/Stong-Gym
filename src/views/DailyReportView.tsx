@@ -13,10 +13,13 @@ import {
   BookOpen,
   Wallet,
   ArrowDownLeft,
+  PackageCheck,
+  Percent,
+  Coins,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { formatAZN, formatDateAZ, getTodayISODate, getCurrentMonthKey } from '../utils/dateUtils';
-import { calculateFinancialMetricsForRange } from '../utils/financialCalculations';
+import { calculateFinancialMetricsForRange, calculateNetProfit } from '../utils/financialCalculations';
 import { exportDailyReportsToCSV } from '../utils/exportUtils';
 import { StaffPaymentBreakdown } from '../components/StaffPaymentBreakdown';
 
@@ -56,6 +59,16 @@ export const DailyReportView: React.FC = () => {
         endDate: selectedDate,
       }),
     [sales, debts, purchases, expenses, selectedDate]
+  );
+
+  const dayProfit = useMemo(
+    () =>
+      calculateNetProfit(
+        dayMetrics.grossSalesTotal,
+        dayMetrics.purchasesOutflow,
+        dayMetrics.expensesOutflow
+      ),
+    [dayMetrics]
   );
 
   // Calculate expected inflows for selectedDate (Sales + Debt Collections, without double counting)
@@ -117,26 +130,26 @@ export const DailyReportView: React.FC = () => {
   const monthPos = monthReports.reduce((sum, r) => sum + r.posAmount, 0);
   const monthTotal = monthCash + monthCard + monthPos;
 
+  const cardTotal = Math.round((dayMetrics.cardSales + dayMetrics.posSales) * 100) / 100;
+
   return (
     <div className="space-y-6 pb-12 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-zinc-200 dark:border-zinc-800">
         <div>
-          <h2 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
-            <span>Gündəlik Kassa Hesabatı</span>
-            <span className="text-xs bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400 font-bold px-2 py-0.5 rounded-full border border-red-200 dark:border-red-800">
-              Hesabat
-            </span>
+          <h2 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight">
+            Gündəlik Kassa və Satış Hesabatı
           </h2>
           <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
-            Ümumi satış, nağd/kart, borcla satış və faktiki kassaya daxil olan pulun dəqiq ayrılması
+            Günlük ümumi satış, ödəniş növləri, nisyə, endirimlər, borc ödənişləri və faktiki kassa balansı
           </p>
         </div>
 
         {isAdmin && (
           <button
+            type="button"
             onClick={() => exportDailyReportsToCSV(dailyReports)}
-            className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
+            className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Hesabatları Export Et</span>
@@ -144,131 +157,183 @@ export const DailyReportView: React.FC = () => {
         )}
       </div>
 
-      {/* Separated Daily Summary Strip: Sales vs Credit vs Actual Cash Drawer */}
+      {/* 10 Authoritative Daily Metrics Grid (2 rows × 5 columns on desktop) */}
       <section className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-xs font-extrabold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-            {formatDateAZ(selectedDate)} — Satış, Borc və Faktiki Kassa Ayırımı
+            {formatDateAZ(selectedDate)} — Tam Gündəlik Maliyyə İcmalı (10 Əsas Göstərici)
           </h3>
           <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
-            Borcla satış kassaya əlavə edilmir; yalnız faktiki ödənilən pullar kassanı artırır
+            Nisyə satışlar kassa qalığına əlavə olunmur; borc ödənişləri ödənildiyi tarixin kassasına daxil edilir
           </span>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-3">
-          {/* 1. Ümumi Satış Məbləği */}
-          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          {/* 1. Gün ərzində ümumi satış */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
             <div className="flex items-center justify-between gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                Ümumi Satış
+                1. Ümumi Satış
               </span>
               <TrendingUp className="w-3.5 h-3.5 text-zinc-400" />
             </div>
-            <div className="text-lg font-black font-mono text-zinc-900 dark:text-white mt-1.5">
+            <div className="text-lg font-black font-mono tabular-nums text-zinc-900 dark:text-white mt-1.5">
               {formatAZN(dayMetrics.grossSalesTotal)}
             </div>
             <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-              {dayMetrics.salesCount} satış (Nisyə daxil)
+              {dayMetrics.salesCount} əməliyyat (Nisyə daxil)
             </div>
           </div>
 
-          {/* 2. Nağd Satış Məbləği */}
-          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+          {/* 2. Nağd satış */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
             <div className="flex items-center justify-between gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                Nağd Satış
+                2. Nağd Satış
               </span>
               <Banknote className="w-3.5 h-3.5 text-emerald-500" />
             </div>
-            <div className="text-lg font-black font-mono text-emerald-700 dark:text-emerald-400 mt-1.5">
+            <div className="text-lg font-black font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1.5">
               {formatAZN(dayMetrics.cashSales)}
             </div>
-            <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+            <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5 font-mono tabular-nums">
               {dayMetrics.debtCollectedCash > 0
                 ? `+${formatAZN(dayMetrics.debtCollectedCash)} borcdan`
                 : 'Birbaşa nağd satış'}
             </div>
           </div>
 
-          {/* 3. Kartla Satış Məbləği */}
-          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+          {/* 3. Kartla satış (+ POS) */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
             <div className="flex items-center justify-between gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
-                Kartla Satış
+                3. Kartla Satış
               </span>
               <CreditCard className="w-3.5 h-3.5 text-blue-500" />
             </div>
-            <div className="text-lg font-black font-mono text-blue-700 dark:text-blue-400 mt-1.5">
-              {formatAZN(dayMetrics.cardSales)}
+            <div className="text-lg font-black font-mono tabular-nums text-blue-700 dark:text-blue-400 mt-1.5">
+              {formatAZN(cardTotal)}
             </div>
-            <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-              POS: <span className="font-mono font-semibold">{formatAZN(dayMetrics.posSales)}</span>
+            <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5 font-mono tabular-nums">
+              Kart: {formatAZN(dayMetrics.cardSales)} · POS: {formatAZN(dayMetrics.posSales)}
             </div>
           </div>
 
-          {/* 4. Borcla Satış Məbləği */}
-          <div className="p-4 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 shadow-sm">
+          {/* 4. Nisyə satış */}
+          <div className="p-4 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60">
             <div className="flex items-center justify-between gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400">
-                Borcla Satış
+                4. Nisyə Satış
               </span>
               <BookOpen className="w-3.5 h-3.5 text-rose-500" />
             </div>
-            <div className="text-lg font-black font-mono text-rose-700 dark:text-rose-400 mt-1.5">
+            <div className="text-lg font-black font-mono tabular-nums text-rose-700 dark:text-rose-400 mt-1.5">
               {formatAZN(dayMetrics.creditSales)}
             </div>
             <div className="text-[10px] text-rose-700/80 dark:text-rose-300/80 mt-0.5 font-semibold">
-              Kassaya əlavə olunmur
+              Kassaya daxil olmur
             </div>
           </div>
 
-          {/* 5. Geri Alınan Borc */}
-          <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 shadow-sm">
+          {/* 5. Borclardan daxil olan ödənişlər */}
+          <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60">
             <div className="flex items-center justify-between gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
-                Geri Alınan Borc
+                5. Borc Ödənişləri
               </span>
               <ArrowDownLeft className="w-3.5 h-3.5 text-amber-500" />
             </div>
-            <div className="text-lg font-black font-mono text-amber-700 dark:text-amber-400 mt-1.5">
+            <div className="text-lg font-black font-mono tabular-nums text-amber-700 dark:text-amber-400 mt-1.5">
               {formatAZN(dayMetrics.debtCollectedTotal)}
             </div>
             <div className="text-[10px] text-amber-700/80 dark:text-amber-300/80 mt-0.5">
-              {dayMetrics.debtCollectedCount} ödəniş (Kassaya əlavə)
+              {dayMetrics.debtCollectedCount} ödəniş · Kassaya əlavə
             </div>
           </div>
 
-          {/* 6. Faktiki Kassaya Daxil Olan Pul */}
-          <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800 shadow-sm">
+          {/* 6. Satılan məhsul sayı */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                6. Satılan Məhsul Sayı
+              </span>
+              <PackageCheck className="w-3.5 h-3.5 text-zinc-400" />
+            </div>
+            <div className="text-lg font-black font-mono tabular-nums text-zinc-900 dark:text-white mt-1.5">
+              {dayMetrics.totalItemsSold} ədəd
+            </div>
+            <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+              Günlük stokdan çıxış
+            </div>
+          </div>
+
+          {/* 7. Günün ümumi gəliri */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                7. Günün Ümumi Gəliri
+              </span>
+              <Coins className="w-3.5 h-3.5 text-emerald-500" />
+            </div>
+            <div
+              className={`text-lg font-black font-mono tabular-nums mt-1.5 ${
+                dayProfit.isProfit
+                  ? 'text-zinc-900 dark:text-white'
+                  : 'text-red-600 dark:text-red-400'
+              }`}
+            >
+              {formatAZN(dayProfit.netProfit)}
+            </div>
+            <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5 font-mono tabular-nums truncate">
+              Alış/Xərc: −{formatAZN(dayMetrics.totalCashOutflow)}
+            </div>
+          </div>
+
+          {/* 8. Verilən endirimlər */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                8. Verilən Endirimlər
+              </span>
+              <Percent className="w-3.5 h-3.5 text-amber-500" />
+            </div>
+            <div className="text-lg font-black font-mono tabular-nums text-amber-600 dark:text-amber-400 mt-1.5">
+              {formatAZN(dayMetrics.totalDiscounts)}
+            </div>
+            <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5 font-mono tabular-nums">
+              Endirimsiz: {formatAZN(dayMetrics.grossBeforeDiscount)}
+            </div>
+          </div>
+
+          {/* 9. Günün sonunda kassada olan məbləğ */}
+          <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800">
             <div className="flex items-center justify-between gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
-                Faktiki Kassaya Girən
+                9. Kassada Olan Məbləğ
               </span>
               <Wallet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
             </div>
-            <div className="text-lg font-black font-mono text-emerald-800 dark:text-emerald-300 mt-1.5">
+            <div className="text-lg font-black font-mono tabular-nums text-emerald-800 dark:text-emerald-300 mt-1.5">
               {formatAZN(dayMetrics.actualDrawerInflow)}
             </div>
-            <div className="text-[10px] text-emerald-800/80 dark:text-emerald-400/80 mt-0.5 font-mono">
-              {dayMetrics.totalCashOutflow > 0
-                ? `Xalis: ${formatAZN(dayMetrics.netCashBalance)}`
-                : 'Nağd+Kart+POS+Borc ödənişi'}
+            <div className="text-[10px] text-emerald-800/80 dark:text-emerald-400/80 mt-0.5 font-mono tabular-nums">
+              Xalis qalıq: {formatAZN(dayMetrics.netCashBalance)}
             </div>
           </div>
 
-          {/* 7. Ödənilməmiş Borcların Ümumi Məbləği */}
-          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm col-span-2 md:col-span-1">
+          {/* 10. Aktiv borcların ümumi məbləği */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
             <div className="flex items-center justify-between gap-1">
               <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                Ümumi Qalıq Borc
+                10. Aktiv Borc Cəmi
               </span>
               <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
             </div>
-            <div className="text-lg font-black font-mono text-red-600 dark:text-red-400 mt-1.5">
+            <div className="text-lg font-black font-mono tabular-nums text-red-600 dark:text-red-400 mt-1.5">
               {formatAZN(dayMetrics.totalUnpaidDebts)}
             </div>
             <div className="text-[10px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-              Ödənilməmiş borcların cəmi
+              Ödənilməmiş qalıq borclar
             </div>
           </div>
         </div>
@@ -278,7 +343,7 @@ export const DailyReportView: React.FC = () => {
       <StaffPaymentBreakdown defaultDate={selectedDate} />
 
       {/* Date Selector Banner */}
-      <div className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <Calendar className="w-5 h-5 text-red-500 shrink-0" />
           <div>
@@ -312,7 +377,7 @@ export const DailyReportView: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         <form
           onSubmit={handleSave}
-          className="lg:col-span-7 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm dark:shadow-xl p-6 space-y-5"
+          className="lg:col-span-7 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 p-6 space-y-5"
         >
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-zinc-200 dark:border-zinc-800">
             <h3 className="text-base font-bold text-zinc-900 dark:text-white">
@@ -337,7 +402,7 @@ export const DailyReportView: React.FC = () => {
                 required
                 value={cashInput}
                 onChange={e => setCashInput(e.target.value)}
-                className="w-full px-4 py-2.5 text-base font-mono font-bold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full px-4 py-2.5 text-base font-mono tabular-nums font-bold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
 
@@ -354,7 +419,7 @@ export const DailyReportView: React.FC = () => {
                 required
                 value={cardInput}
                 onChange={e => setCardInput(e.target.value)}
-                className="w-full px-4 py-2.5 text-base font-mono font-bold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-4 py-2.5 text-base font-mono tabular-nums font-bold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
@@ -371,7 +436,7 @@ export const DailyReportView: React.FC = () => {
                 required
                 value={posInput}
                 onChange={e => setPosInput(e.target.value)}
-                className="w-full px-4 py-2.5 text-base font-mono font-bold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                className="w-full px-4 py-2.5 text-base font-mono tabular-nums font-bold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
               />
             </div>
 
@@ -395,7 +460,7 @@ export const DailyReportView: React.FC = () => {
               <span className="text-[10px] text-zinc-500 dark:text-zinc-400 uppercase font-bold block">
                 Hesablanan Gün Cəmi
               </span>
-              <span className="text-xl font-black font-mono text-zinc-900 dark:text-white">
+              <span className="text-xl font-black font-mono tabular-nums text-zinc-900 dark:text-white">
                 {formatAZN(currentTotal)}
               </span>
             </div>
@@ -413,7 +478,7 @@ export const DailyReportView: React.FC = () => {
 
         {/* Verification and Difference Box */}
         <div className="lg:col-span-5 space-y-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm dark:shadow-xl p-6 space-y-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 p-6 space-y-4">
             <h4 className="text-sm font-bold text-zinc-900 dark:text-white">
               Kassa və Satış Uyğunluğu Yoxlanışı
             </h4>
@@ -438,7 +503,7 @@ export const DailyReportView: React.FC = () => {
               {!isMatch && (
                 <p className="text-xs mt-1.5">
                   Fərq:{' '}
-                  <strong className="font-mono">
+                  <strong className="font-mono tabular-nums">
                     {discrepancy > 0
                       ? `+${formatAZN(discrepancy)} artıq`
                       : `${formatAZN(discrepancy)} əskik`}
@@ -451,13 +516,13 @@ export const DailyReportView: React.FC = () => {
             <div className="divide-y divide-zinc-200 dark:divide-zinc-800 text-xs">
               <div className="py-2.5 flex justify-between">
                 <span className="text-zinc-500 dark:text-zinc-400">Daxil Edilən Kassa Cəmi:</span>
-                <span className="font-mono font-bold text-zinc-900 dark:text-white">
+                <span className="font-mono tabular-nums font-bold text-zinc-900 dark:text-white">
                   {formatAZN(currentTotal)}
                 </span>
               </div>
               <div className="py-2.5 flex justify-between">
                 <span className="text-zinc-500 dark:text-zinc-400">Satışdan Gələn (Nağd/Kart/POS):</span>
-                <span className="font-mono font-semibold text-zinc-800 dark:text-zinc-200">
+                <span className="font-mono tabular-nums font-semibold text-zinc-800 dark:text-zinc-200">
                   {formatAZN(dayInflowStats.salesTotal)}
                 </span>
               </div>
@@ -465,7 +530,7 @@ export const DailyReportView: React.FC = () => {
                 <span className="text-zinc-500 dark:text-zinc-400">
                   Borc Ödənişindən Gələn ({dayInflowStats.debtPaymentsCount} əd.):
                 </span>
-                <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
+                <span className="font-mono tabular-nums font-semibold text-amber-600 dark:text-amber-400">
                   {formatAZN(dayInflowStats.debtTotal)}
                 </span>
               </div>
@@ -473,14 +538,14 @@ export const DailyReportView: React.FC = () => {
                 <span className="text-zinc-700 dark:text-zinc-300 font-semibold">
                   Gözlənilən Ümumi Daxilolma:
                 </span>
-                <span className="font-mono font-bold text-zinc-900 dark:text-white">
+                <span className="font-mono tabular-nums font-bold text-zinc-900 dark:text-white">
                   {formatAZN(dayInflowStats.expectedTotal)}
                 </span>
               </div>
               <div className="py-2.5 flex justify-between">
                 <span className="text-zinc-500 dark:text-zinc-400">Fərq Məbləği:</span>
                 <span
-                  className={`font-mono font-bold ${
+                  className={`font-mono tabular-nums font-bold ${
                     isMatch ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
                   }`}
                 >
@@ -494,7 +559,7 @@ export const DailyReportView: React.FC = () => {
 
       {/* MONTHLY REPORT ACCUMULATION (ADMIN ONLY) */}
       {isAdmin ? (
-        <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm dark:shadow-xl p-6 space-y-5">
+        <div className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 p-6 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-zinc-200 dark:border-zinc-800">
             <div>
               <h3 className="text-base font-bold text-zinc-900 dark:text-white">
@@ -521,7 +586,7 @@ export const DailyReportView: React.FC = () => {
               <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
                 Aylıq Nağd
               </span>
-              <span className="text-lg font-black font-mono text-zinc-900 dark:text-white mt-1 block">
+              <span className="text-lg font-black font-mono tabular-nums text-zinc-900 dark:text-white mt-1 block">
                 {formatAZN(monthCash)}
               </span>
             </div>
@@ -530,7 +595,7 @@ export const DailyReportView: React.FC = () => {
               <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 block">
                 Aylıq Bank Kartı
               </span>
-              <span className="text-lg font-black font-mono text-zinc-900 dark:text-white mt-1 block">
+              <span className="text-lg font-black font-mono tabular-nums text-zinc-900 dark:text-white mt-1 block">
                 {formatAZN(monthCard)}
               </span>
             </div>
@@ -539,7 +604,7 @@ export const DailyReportView: React.FC = () => {
               <span className="text-[10px] font-bold uppercase tracking-wider text-red-600 dark:text-red-400 block">
                 Aylıq POS Terminal
               </span>
-              <span className="text-lg font-black font-mono text-zinc-900 dark:text-white mt-1 block">
+              <span className="text-lg font-black font-mono tabular-nums text-zinc-900 dark:text-white mt-1 block">
                 {formatAZN(monthPos)}
               </span>
             </div>
@@ -548,7 +613,7 @@ export const DailyReportView: React.FC = () => {
               <span className="text-[10px] font-bold uppercase tracking-wider text-red-700 dark:text-red-300 block">
                 Aylıq Ümumi Kassa
               </span>
-              <span className="text-lg font-black font-mono text-red-700 dark:text-white mt-1 block">
+              <span className="text-lg font-black font-mono tabular-nums text-red-700 dark:text-white mt-1 block">
                 {formatAZN(monthTotal)}
               </span>
             </div>

@@ -156,6 +156,29 @@ export function mapSaleToDB(s: Sale) {
     date: s.date,
     time: s.time,
     items: s.items,
+    subtotal_amount: s.subtotalAmount ?? s.totalAmount + (s.discountAmount || 0),
+    discount_amount: s.discountAmount || 0,
+    total_amount: s.totalAmount,
+    payment_type: s.paymentType,
+    debtor_name: s.debtorName || null,
+    debtor_phone: s.debtorPhone || null,
+    original_date: s.originalDate || s.date,
+    date_changed_at: s.dateChangedAt || null,
+    updated_at: s.updatedAt || null,
+    is_confirmed: s.isConfirmed,
+    confirmed_at: s.confirmedAt || null,
+    confirmed_by: s.confirmedBy || null,
+    created_at: s.createdAt,
+    created_by: s.createdBy,
+  };
+}
+
+export function mapSaleToLegacyDB(s: Sale) {
+  return {
+    id: s.id,
+    date: s.date,
+    time: s.time,
+    items: s.items,
     total_amount: s.totalAmount,
     payment_type: s.paymentType,
     debtor_name: s.debtorName || null,
@@ -168,14 +191,25 @@ export function mapSaleToDB(s: Sale) {
 }
 
 export function mapDBToSale(row: any): Sale {
+  const totalAmount = Number(row.total_amount) || 0;
+  const discountAmount = Number(row.discount_amount) || 0;
   return {
     id: row.id,
     date: row.date,
     time: row.time,
     items: row.items || [],
-    totalAmount: Number(row.total_amount) || 0,
+    subtotalAmount:
+      row.subtotal_amount !== null && row.subtotal_amount !== undefined
+        ? Number(row.subtotal_amount)
+        : Math.round((totalAmount + discountAmount) * 100) / 100,
+    discountAmount,
+    totalAmount,
     paymentType: row.payment_type,
     debtorName: row.debtor_name || undefined,
+    debtorPhone: row.debtor_phone || undefined,
+    originalDate: row.original_date || undefined,
+    dateChangedAt: row.date_changed_at || undefined,
+    updatedAt: row.updated_at || undefined,
     isConfirmed: Boolean(row.is_confirmed),
     confirmedAt: row.confirmed_at || undefined,
     confirmedBy: row.confirmed_by || undefined,
@@ -216,6 +250,25 @@ export function mapDebtToDB(d: DebtRecord) {
   return {
     id: d.id,
     debtor_name: d.debtorName,
+    debtor_phone: d.debtorPhone || null,
+    items: d.items,
+    total_amount: d.totalAmount,
+    paid_amount: d.paidAmount,
+    remaining_amount: d.remainingAmount,
+    date: d.date,
+    status: d.status,
+    sale_id: d.saleId || null,
+    notes: d.notes || null,
+    payments: d.payments || [],
+    created_at: d.createdAt,
+    updated_at: d.updatedAt,
+  };
+}
+
+export function mapDebtToLegacyDB(d: DebtRecord) {
+  return {
+    id: d.id,
+    debtor_name: d.debtorName,
     items: d.items,
     total_amount: d.totalAmount,
     paid_amount: d.paidAmount,
@@ -234,6 +287,7 @@ export function mapDBToDebt(row: any): DebtRecord {
   return {
     id: row.id,
     debtorName: row.debtor_name,
+    debtorPhone: row.debtor_phone || undefined,
     items: row.items || [],
     totalAmount: Number(row.total_amount) || 0,
     paidAmount: Number(row.paid_amount) || 0,

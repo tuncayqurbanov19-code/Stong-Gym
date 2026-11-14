@@ -27,12 +27,14 @@ export function calculateProductStock(
     .filter(p => p.productId === product.id)
     .reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
 
-  // Sum total sold quantity for this product from confirmed sales
+  // Sum total sold quantity for this product from confirmed sales AND credit ('borc') sales immediately
   const totalSold = sales
-    .filter(s => s.isConfirmed)
+    .filter(s => s.isConfirmed || s.paymentType === 'borc')
     .reduce((sum, s) => {
-      const item = s.items.find(i => i.productId === product.id);
-      return sum + (item ? Number(item.quantity) || 0 : 0);
+      const matchingQty = (s.items || [])
+        .filter(i => i.productId === product.id)
+        .reduce((itemSum, i) => itemSum + (Number(i.quantity) || 0), 0);
+      return sum + matchingQty;
     }, 0);
 
   const initialStock = Number(product.initialStock) || 0;

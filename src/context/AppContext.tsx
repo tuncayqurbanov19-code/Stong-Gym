@@ -29,10 +29,12 @@ import {
   mapProductToDB,
   mapDBToSale,
   mapSaleToDB,
+  mapSaleToLegacyDB,
   mapDBToPurchase,
   mapPurchaseToDB,
   mapDBToDebt,
   mapDebtToDB,
+  mapDebtToLegacyDB,
   mapDBToDebtPayment,
   mapDebtPaymentToDB,
   mapDBToDailyReport,
@@ -108,14 +110,22 @@ interface AppContextType {
     items: { productId: string; quantity: number }[];
     paymentType: Sale['paymentType'];
     debtorName?: string;
+    debtorPhone?: string;
+    discountAmount?: number;
     customDate?: string;
     customTime?: string;
   }) => { success: boolean; saleId?: string; error?: string };
+  updateSaleDate: (saleId: string, newDate: string, newTime?: string) => { success: boolean; error?: string };
   confirmSale: (saleId: string) => void;
   confirmDaySales: (date: string) => void;
   deleteSale: (saleId: string) => void;
   debts: DebtRecord[];
-  addDebt: (debt: Omit<DebtRecord, 'id' | 'createdAt' | 'updatedAt' | 'payments' | 'remainingAmount' | 'status'>) => void;
+  addDebt: (
+    debt: Omit<DebtRecord, 'id' | 'createdAt' | 'updatedAt' | 'payments' | 'remainingAmount' | 'status'> & {
+      productId?: string;
+      quantity?: number;
+    }
+  ) => { success: boolean; error?: string };
   payDebt: (debtId: string, amount: number, note?: string) => void;
   acceptDebtPayment: (params: AcceptDebtPaymentParams) => Promise<{ success: boolean; error?: string }>;
   deleteDebtPayment: (debtId: string, paymentId: string) => Promise<{ success: boolean; error?: string }>;
@@ -934,82 +944,147 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [products, purchases, sales, settings.minStockThreshold]
   );
 
+  const lastSaleGuardRef = React.useRef<{ sig: string; ts: number }>({ sig: '', ts: 0 });
+
+  const upsertSaleSafe = (sale: Sale, isUpdate = false) => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    const run = async () => {
+      const payload = mapSaleToDB(sale);
+      const res = isUpdate
+        ? await supabase.from('sales').update(payload).eq('id', sale.id)
+        : await supabase.from('sales').insert(payload);
+      if (res.error && /column/i.test(res.error.message || '')) {
+        const legacy = mapSaleToLegacyDB(sale);
+        if (isUpdate) {
+          await supabase.from('sales').update(legacy).eq('id', sale.id);
+        } else {
+          await supabase.from('sales').insert(legacy);
+        }
+      }
+    };
+    safeDbExec(run());
+  };
+
+  const upsertDebtSafe = (debt: DebtRecord, isUpdate = false) => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    const run = async () => {
+      const payload = mapDebtToDB(debt);
+      const res = isUpdate
+        ? await supabase.from('debts').update(payload).eq('id', debt.id)
+        : await supabase.from('debts').insert(payload);
+      if (res.error && /column/i.test(res.error.message || '')) {
+        const legacy = mapDebtToLegacyDB(debt);
+        if (isUpdate) {
+          await supabase.from('debts').update(legacy).eq('id', debt.id);
+        } else {
+          await supabase.from('debts').insert(legacy);
+        }
+      }
+    };
+    safeDbExec(run());
+  };
+
+  const syncDailyReportsForDates = (
+    targetDates: string[],
+    overrideSales?: Sale[],
+    overrideDebts?: DebtRecord[]
+  ) => {
+    const uniqueDates = Array.from(new Set(targetDates.filter(Boolean)));
+    if (uniqueDates.length === 0) return;
+
+    const activeDebts = overrideDebts || debts;
+    const baseSales = overrideSales || sales;
+    const reportsToPush: DailyReport[] = [];
+    const nowIso = new Date().toISOString();
+
+    setDailyReports(prev => {
+      let next = [...prev];
+
+      for (const date of uniqueDates) {
+        const existing = next.find(r => r.date === date);
+        const allSalesForDay = baseSales.filter(
+          s => s.date === date && s.isConfirmed && s.paymentType !== 'borc' && s.paymentType !== 'balans'
+        );
+        const allDebtPaymentsForDay = activeDebts.flatMap(d =>
+          (d.payments || []).filter(p => (p.paidAt || p.date || '').split('T')[0] === date)
+        );
+
+        let cash = allSalesForDay.filter(s => s.paymentType === 'naqd').reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+        let card = allSalesForDay.filter(s => s.paymentType === 'kart').reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+        let pos = allSalesForDay.filter(s => s.paymentType === 'pos').reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+
+        for (const p of allDebtPaymentsForDay) {
+          const amt = Number(p.amount) || 0;
+          const m = (p.paymentMethod || 'naqd').toLowerCase();
+          if (m === 'kart') card += amt;
+          else if (m === 'pos' || m === 'kocurme') pos += amt;
+          else cash += amt;
+        }
+
+        cash = Math.round(cash * 100) / 100;
+        card = Math.round(card * 100) / 100;
+        pos = Math.round(pos * 100) / 100;
+        const total = Math.round((cash + card + pos) * 100) / 100;
+
+        if (existing) {
+          const updatedReport: DailyReport = !existing.isManuallyAdjusted
+            ? {
+                ...existing,
+                cashAmount: cash,
+                cardAmount: card,
+                posAmount: pos,
+                totalAmount: total,
+                difference: 0,
+                updatedAt: nowIso,
+                updatedBy: currentUser?.username || 'sistem',
+              }
+            : {
+                ...existing,
+                difference: Math.round((existing.totalAmount - total) * 100) / 100,
+                updatedAt: nowIso,
+              };
+          next = next.map(r => (r.date === date ? updatedReport : r));
+          reportsToPush.push(updatedReport);
+        } else {
+          const newReport: DailyReport = {
+            id: `rep-${date}`,
+            date,
+            cashAmount: cash,
+            cardAmount: card,
+            posAmount: pos,
+            totalAmount: total,
+            isManuallyAdjusted: false,
+            difference: 0,
+            updatedBy: currentUser?.username || 'sistem',
+            updatedAt: nowIso,
+          };
+          next = [newReport, ...next];
+          reportsToPush.push(newReport);
+        }
+      }
+
+      return next;
+    });
+
+    const supabase = getSupabaseClient();
+    if (supabase && reportsToPush.length > 0) {
+      safeDbExec(supabase.from('daily_reports').upsert(reportsToPush.map(mapDailyReportToDB)));
+    }
+  };
+
   const syncDailyReportForDate = (
     date: string,
     additionalSale?: Sale,
     overrideDebts?: DebtRecord[],
     overrideSales?: Sale[]
   ) => {
-    const activeDebts = overrideDebts || debts;
     const baseSales = overrideSales || sales;
-    const allDebtPaymentsForDay = activeDebts.flatMap(d =>
-      (d.payments || []).filter(p => (p.paidAt || p.date || '').split('T')[0] === date)
-    );
-
-    setDailyReports(prev => {
-      const existing = prev.find(r => r.date === date);
-      const combinedSales = additionalSale
-        ? [additionalSale, ...baseSales.filter(s => s.id !== additionalSale.id)]
-        : baseSales;
-      const allSalesForDay = combinedSales.filter(
-        s => s.date === date && s.isConfirmed && s.paymentType !== 'borc' && s.paymentType !== 'balans'
-      );
-
-      let cash = allSalesForDay.filter(s => s.paymentType === 'naqd').reduce((sum, s) => sum + s.totalAmount, 0);
-      let card = allSalesForDay.filter(s => s.paymentType === 'kart').reduce((sum, s) => sum + s.totalAmount, 0);
-      let pos = allSalesForDay.filter(s => s.paymentType === 'pos').reduce((sum, s) => sum + s.totalAmount, 0);
-
-      for (const p of allDebtPaymentsForDay) {
-        const amt = Number(p.amount) || 0;
-        const m = (p.paymentMethod || 'naqd').toLowerCase();
-        if (m === 'kart') card += amt;
-        else if (m === 'pos' || m === 'kocurme') pos += amt;
-        else cash += amt;
-      }
-
-      cash = Math.round(cash * 100) / 100;
-      card = Math.round(card * 100) / 100;
-      pos = Math.round(pos * 100) / 100;
-      const total = Math.round((cash + card + pos) * 100) / 100;
-
-      if (existing) {
-        if (!existing.isManuallyAdjusted) {
-          return prev.map(r =>
-            r.date === date
-              ? {
-                  ...r,
-                  cashAmount: cash,
-                  cardAmount: card,
-                  posAmount: pos,
-                  totalAmount: total,
-                  difference: 0,
-                  updatedAt: new Date().toISOString(),
-                  updatedBy: currentUser?.username || 'sistem',
-                }
-              : r
-          );
-        } else {
-          const diff = Math.round((existing.totalAmount - total) * 100) / 100;
-          return prev.map(r =>
-            r.date === date ? { ...r, difference: diff, updatedAt: new Date().toISOString() } : r
-          );
-        }
-      } else {
-        const newReport: DailyReport = {
-          id: `rep-${date}`,
-          date,
-          cashAmount: cash,
-          cardAmount: card,
-          posAmount: pos,
-          totalAmount: total,
-          isManuallyAdjusted: false,
-          difference: 0,
-          updatedBy: currentUser?.username || 'sistem',
-          updatedAt: new Date().toISOString(),
-        };
-        return [newReport, ...prev];
-      }
-    });
+    const combinedSales = additionalSale
+      ? [additionalSale, ...baseSales.filter(s => s.id !== additionalSale.id)]
+      : baseSales;
+    syncDailyReportsForDates([date], combinedSales, overrideDebts);
   };
 
   const depositToCustomer = (
@@ -1133,6 +1208,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     items: { productId: string; quantity: number }[];
     paymentType: Sale['paymentType'];
     debtorName?: string;
+    debtorPhone?: string;
+    discountAmount?: number;
     customDate?: string;
     customTime?: string;
   }): { success: boolean; saleId?: string; error?: string } => {
@@ -1140,31 +1217,74 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, error: 'Səbət boşdur!' };
     }
 
-    const resolvedItems: Sale['items'] = [];
-    let totalAmount = 0;
-
+    // Consolidate duplicate product lines to prevent double counting / validation gaps
+    const consolidatedQty: Record<string, number> = {};
     for (const it of saleData.items) {
-      const prod = products.find(p => p.id === it.productId);
+      const q = Math.floor(Number(it.quantity) || 0);
+      if (q > 0 && it.productId) {
+        consolidatedQty[it.productId] = (consolidatedQty[it.productId] || 0) + q;
+      }
+    }
+
+    const entries = Object.entries(consolidatedQty);
+    if (entries.length === 0) {
+      return { success: false, error: 'Etibarlı məhsul və ya say daxil edilməyib!' };
+    }
+
+    // Guard against rapid accidental double click (identical payload within 700ms)
+    const saleSig = JSON.stringify({ entries, pt: saleData.paymentType, dn: saleData.debtorName, d: saleData.customDate });
+    const nowTs = Date.now();
+    if (lastSaleGuardRef.current.sig === saleSig && nowTs - lastSaleGuardRef.current.ts < 700) {
+      return { success: false, error: 'Əməliyyat artıq icra olunur.' };
+    }
+
+    const resolvedItems: Sale['items'] = [];
+    let subtotalAmount = 0;
+
+    for (const [productId, quantity] of entries) {
+      const prod = products.find(p => p.id === productId);
       if (!prod) continue;
+
+      const stockInfo = calculateProductStock(prod, purchases, sales, settings.minStockThreshold);
+      if (stockInfo.activeStock < quantity) {
+        return {
+          success: false,
+          error: `"${prod.name}" üçün anbar qalığı kifayət deyil! Mövcud stok: ${stockInfo.activeStock}, Tələb: ${quantity}`,
+        };
+      }
+
       const unitPrice = prod.salePrice;
-      const itemTotal = unitPrice * it.quantity;
-      totalAmount += itemTotal;
+      const itemTotal = Math.round(unitPrice * quantity * 100) / 100;
+      subtotalAmount += itemTotal;
       resolvedItems.push({
         productId: prod.id,
         productName: prod.name,
-        quantity: it.quantity,
+        quantity,
         unitPrice,
         totalPrice: itemTotal,
       });
     }
 
+    subtotalAmount = Math.round(subtotalAmount * 100) / 100;
+
     if (resolvedItems.length === 0) {
       return { success: false, error: 'Məhsul tapılmadı!' };
     }
 
-    const saleId = `sale-${Date.now()}`;
+    const rawDiscount = Math.max(0, Number(saleData.discountAmount) || 0);
+    const discountAmount = Math.min(subtotalAmount, Math.round(rawDiscount * 100) / 100);
+    const totalAmount = Math.max(0, Math.round((subtotalAmount - discountAmount) * 100) / 100);
 
-    // If payment type is 'balans', check customer account and deduce funds
+    if (saleData.paymentType === 'borc' && !(saleData.debtorName || '').trim()) {
+      return { success: false, error: 'Nisyə satış üçün borclunun ad və soyadı mütləqdir!' };
+    }
+
+    const date = (saleData.customDate || getTodayISODate()).split('T')[0];
+    const time = saleData.customTime || getCurrentTimeHHMM();
+    const nowIso = new Date().toISOString();
+    const saleId = `sale-${nowTs}`;
+
+    // If payment type is 'balans', check customer account and deduct funds
     if (saleData.paymentType === 'balans') {
       const custName = (saleData.debtorName || '').trim();
       if (!custName) {
@@ -1183,39 +1303,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       chargeCustomerBalance(custName, totalAmount, `Satış #${saleId}`, saleId);
     }
 
-    const isConfirmed = settings.autoConfirmSales;
-    const date = saleData.customDate || getTodayISODate();
-    const time = saleData.customTime || getCurrentTimeHHMM();
+    lastSaleGuardRef.current = { sig: saleSig, ts: nowTs };
+
+    // Credit sales are immediately confirmed so stock & debt reflect right away
+    const isConfirmed = saleData.paymentType === 'borc' ? true : settings.autoConfirmSales;
+    const cleanDebtorName = saleData.debtorName?.trim() || undefined;
+    const cleanDebtorPhone = saleData.debtorPhone?.trim() || undefined;
 
     const newSale: Sale = {
       id: saleId,
       date,
       time,
       items: resolvedItems,
+      subtotalAmount,
+      discountAmount,
       totalAmount,
       paymentType: saleData.paymentType,
       debtorName:
         saleData.paymentType === 'borc'
-          ? (saleData.debtorName || 'Adsız borclu')
+          ? (cleanDebtorName || 'Adsız borclu')
           : saleData.paymentType === 'balans'
-          ? (saleData.debtorName || 'Müştəri')
+          ? (cleanDebtorName || 'Müştəri')
           : undefined,
+      debtorPhone: saleData.paymentType === 'borc' ? cleanDebtorPhone : undefined,
+      originalDate: date,
       isConfirmed,
-      confirmedAt: isConfirmed ? new Date().toISOString() : undefined,
+      confirmedAt: isConfirmed ? nowIso : undefined,
       confirmedBy: isConfirmed ? (currentUser?.username || 'sistem') : undefined,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
       createdBy: currentUser?.username || 'isci',
     };
 
     const updatedSales = [newSale, ...sales];
     setSales(updatedSales);
 
-    // If payment type is BORC, automatically create a DebtRecord
+    // If payment type is BORC, automatically create a DebtRecord linked to this Sale
     let createdDebt: DebtRecord | null = null;
-    if (saleData.paymentType === 'borc' && saleData.debtorName) {
+    if (saleData.paymentType === 'borc' && cleanDebtorName) {
       createdDebt = {
-        id: `debt-${Date.now()}`,
-        debtorName: saleData.debtorName.trim(),
+        id: `debt-${nowTs}`,
+        debtorName: cleanDebtorName,
+        debtorPhone: cleanDebtorPhone,
         items: resolvedItems.map(i => ({
           productName: i.productName,
           quantity: i.quantity,
@@ -1227,20 +1355,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         date,
         status: 'borcdadir',
         saleId,
+        notes: discountAmount > 0 ? `Endirim tətbiq edilib: ${discountAmount.toFixed(2)} AZN` : undefined,
         payments: [],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: nowIso,
+        updatedAt: nowIso,
       };
-      setDebts(prev => [createdDebt!, ...prev]);
-    }
-
-    // Sync daily report (Nağd, Kart, POS are recorded; Borc and Balans are excluded from today's physical drawer)
-    if (isConfirmed && saleData.paymentType !== 'borc' && saleData.paymentType !== 'balans') {
-      syncDailyReportForDate(date, newSale, undefined, updatedSales);
+      const nextDebts = [createdDebt, ...debts];
+      setDebts(nextDebts);
+      syncDailyReportsForDates([date], updatedSales, nextDebts);
+    } else if (isConfirmed && saleData.paymentType !== 'balans') {
+      syncDailyReportsForDates([date], updatedSales, debts);
     }
 
     // CHECK STOCK & TRIGGER BROWSER PUSH NOTIFICATION IF STOCK <= THRESHOLD!
-    if (isConfirmed && settings.enablePushNotifications) {
+    if (settings.enablePushNotifications) {
       for (const item of resolvedItems) {
         const prod = products.find(p => p.id === item.productId);
         if (prod) {
@@ -1256,19 +1384,75 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     addAuditLog(
       'Yeni Satış',
-      `Məbləğ: ${totalAmount.toFixed(2)} AZN, Ödəniş: ${saleData.paymentType.toUpperCase()}`
+      `Tarix: ${date} | Məbləğ: ${totalAmount.toFixed(2)} AZN${discountAmount > 0 ? ` (Endirim: ${discountAmount.toFixed(2)} AZN)` : ''}, Ödəniş: ${saleData.paymentType.toUpperCase()}${cleanDebtorName ? `, Müştəri: ${cleanDebtorName}` : ''}`
     );
 
-    // Sync to Supabase in background
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      safeDbExec(supabase.from('sales').insert(mapSaleToDB(newSale)));
-      if (createdDebt) {
-        safeDbExec(supabase.from('debts').insert(mapDebtToDB(createdDebt)));
-      }
+    upsertSaleSafe(newSale, false);
+    if (createdDebt) {
+      upsertDebtSafe(createdDebt, false);
     }
 
     return { success: true, saleId };
+  };
+
+  const updateSaleDate = (
+    saleId: string,
+    newDate: string,
+    newTime?: string
+  ): { success: boolean; error?: string } => {
+    const cleanNewDate = (newDate || '').trim().split('T')[0];
+    if (!cleanNewDate || !/^\d{4}-\d{2}-\d{2}$/.test(cleanNewDate)) {
+      return { success: false, error: 'Düzgün tarix formatı seçin (YYYY-MM-DD).' };
+    }
+
+    const target = sales.find(s => s.id === saleId);
+    if (!target) {
+      return { success: false, error: 'Satış qeydi tapılmadı.' };
+    }
+
+    const oldDate = target.date;
+    const targetTime = (newTime || target.time || getCurrentTimeHHMM()).trim();
+    if (oldDate === cleanNewDate && targetTime === target.time) {
+      return { success: true };
+    }
+
+    const nowIso = new Date().toISOString();
+    const updatedSale: Sale = {
+      ...target,
+      date: cleanNewDate,
+      time: targetTime,
+      originalDate: target.originalDate || oldDate,
+      dateChangedAt: oldDate !== cleanNewDate ? nowIso : target.dateChangedAt,
+      updatedAt: nowIso,
+    };
+
+    const nextSales = sales.map(s => (s.id === saleId ? updatedSale : s));
+    setSales(nextSales);
+
+    // If credit sale has linked DebtRecord, move its creation/report date cleanly without modifying payments
+    let nextDebts = debts;
+    const linkedDebt = debts.find(d => d.saleId === saleId);
+    if (linkedDebt && oldDate !== cleanNewDate) {
+      const updatedDebt: DebtRecord = {
+        ...linkedDebt,
+        date: cleanNewDate,
+        updatedAt: nowIso,
+      };
+      nextDebts = debts.map(d => (d.id === linkedDebt.id ? updatedDebt : d));
+      setDebts(nextDebts);
+      upsertDebtSafe(updatedDebt, true);
+    }
+
+    syncDailyReportsForDates([oldDate, cleanNewDate], nextSales, nextDebts);
+    upsertSaleSafe(updatedSale, true);
+
+    addAuditLog(
+      'Satış Tarixi Dəyişdirildi',
+      `Satış #${saleId}: ${oldDate} (${target.time}) → ${cleanNewDate} (${targetTime}). Faktiki daxilolma: ${new Date(target.createdAt).toLocaleString('az-AZ')}`
+    );
+
+    showToast('success', `Satış tarixi yeniləndi: ${oldDate} → ${cleanNewDate}`);
+    return { success: true };
   };
 
   const confirmSale = (saleId: string) => {
@@ -1283,7 +1467,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     const nextSales = sales.map(s => (s.id === saleId ? updatedSale : s));
     setSales(nextSales);
-    syncDailyReportForDate(updatedSale.date, updatedSale, undefined, nextSales);
+    syncDailyReportsForDates([updatedSale.date], nextSales, debts);
 
     const supabase = getSupabaseClient();
     if (supabase) {
@@ -1329,7 +1513,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return s;
     });
     setSales(nextSales);
-    syncDailyReportForDate(date, undefined, undefined, nextSales);
+    syncDailyReportsForDates([date], nextSales, debts);
     addAuditLog('Günlük Satışlar Təsdiqləndi', `${date} tarixinə aid satışlar təsdiqləndi.`);
   };
 
@@ -1358,33 +1542,140 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     if (targetSale) {
-      syncDailyReportForDate(targetSale.date, undefined, nextDebts, nextSales);
+      syncDailyReportsForDates([targetSale.date], nextSales, nextDebts);
     }
-    addAuditLog('Satış Silindi', `Satış ID: ${saleId} silindi.`);
+    addAuditLog('Satış Silindi', `Satış ID: ${saleId} silindi və anbar qalığı bərpa edildi.`);
 
     if (supabase) {
       safeDbExec(supabase.from('sales').delete().eq('id', saleId));
     }
+    showToast('info', 'Satış ləğv edildi və məhsul stoku bərpa olundu.');
   };
 
-  const addDebt = (newDebt: Omit<DebtRecord, 'id' | 'createdAt' | 'updatedAt' | 'payments' | 'remainingAmount' | 'status'>) => {
-    const debt: DebtRecord = {
-      ...newDebt,
-      id: `debt-${Date.now()}`,
-      paidAmount: 0,
-      remainingAmount: newDebt.totalAmount,
-      status: 'borcdadir',
-      payments: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    setDebts(prev => [debt, ...prev]);
-    addAuditLog('Borc Qeydi Əlavə Edildi', `${debt.debtorName}: ${debt.totalAmount} AZN.`);
-
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      safeDbExec(supabase.from('debts').insert(mapDebtToDB(debt)));
+  const addDebt = (
+    newDebt: Omit<DebtRecord, 'id' | 'createdAt' | 'updatedAt' | 'payments' | 'remainingAmount' | 'status'> & {
+      productId?: string;
+      quantity?: number;
     }
+  ): { success: boolean; error?: string } => {
+    const cleanName = (newDebt.debtorName || '').trim();
+    if (!cleanName) {
+      return { success: false, error: 'Borclunun adı və soyadı daxil edilməlidir.' };
+    }
+
+    const total = Math.max(0, Math.round((Number(newDebt.totalAmount) || 0) * 100) / 100);
+    if (total <= 0) {
+      return { success: false, error: 'Borc məbləği 0-dan böyük olmalıdır.' };
+    }
+
+    const nowTs = Date.now();
+    const nowIso = new Date().toISOString();
+    const cleanDate = (newDebt.date || getTodayISODate()).split('T')[0];
+    const cleanPhone = newDebt.debtorPhone?.trim() || undefined;
+    const paid = Math.min(total, Math.max(0, Math.round((Number(newDebt.paidAmount) || 0) * 100) / 100));
+    const remaining = Math.max(0, Math.round((total - paid) * 100) / 100);
+    const status: DebtRecord['status'] = remaining <= 0 ? 'odanilib' : paid > 0 ? 'qismen' : 'borcdadir';
+
+    let linkedSale: Sale | null = null;
+    if (newDebt.productId) {
+      const prod = products.find(p => p.id === newDebt.productId);
+      const qty = Math.max(1, Math.floor(Number(newDebt.quantity) || 1));
+      if (prod) {
+        const stockInfo = calculateProductStock(prod, purchases, sales, settings.minStockThreshold);
+        if (stockInfo.activeStock < qty) {
+          return {
+            success: false,
+            error: `"${prod.name}" üçün stok kifayət deyil (Qalıq: ${stockInfo.activeStock}, Tələb: ${qty}).`,
+          };
+        }
+        const saleId = `sale-${nowTs}`;
+        linkedSale = {
+          id: saleId,
+          date: cleanDate,
+          time: getCurrentTimeHHMM(),
+          items: [
+            {
+              productId: prod.id,
+              productName: prod.name,
+              quantity: qty,
+              unitPrice: prod.salePrice,
+              totalPrice: total,
+            },
+          ],
+          subtotalAmount: Math.round(prod.salePrice * qty * 100) / 100,
+          discountAmount: Math.max(0, Math.round((prod.salePrice * qty - total) * 100) / 100),
+          totalAmount: total,
+          paymentType: 'borc',
+          debtorName: cleanName,
+          debtorPhone: cleanPhone,
+          originalDate: cleanDate,
+          isConfirmed: true,
+          confirmedAt: nowIso,
+          confirmedBy: currentUser?.username || 'admin',
+          createdAt: nowIso,
+          createdBy: currentUser?.username || 'admin',
+        };
+      }
+    }
+
+    const debtId = `debt-${nowTs}`;
+    const initialPayments: DebtPayment[] =
+      paid > 0
+        ? [
+            {
+              id: `pay-${nowTs}`,
+              debtId,
+              date: cleanDate,
+              paidAt: cleanDate,
+              amount: paid,
+              paymentMethod: 'naqd',
+              receivedBy: currentUser?.username || 'admin',
+              note: 'İlkin ödəniş',
+              createdAt: nowIso,
+            },
+          ]
+        : [];
+
+    const debt: DebtRecord = {
+      id: debtId,
+      debtorName: cleanName,
+      debtorPhone: cleanPhone,
+      items: newDebt.items,
+      totalAmount: total,
+      paidAmount: paid,
+      remainingAmount: remaining,
+      date: cleanDate,
+      status,
+      saleId: linkedSale?.id,
+      notes: newDebt.notes,
+      payments: initialPayments,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+
+    const nextSales = linkedSale ? [linkedSale, ...sales] : sales;
+    const nextDebts = [debt, ...debts];
+    if (linkedSale) {
+      setSales(nextSales);
+      upsertSaleSafe(linkedSale, false);
+    }
+    setDebts(nextDebts);
+    upsertDebtSafe(debt, false);
+
+    if (initialPayments.length > 0) {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        safeDbExec(supabase.from('debt_payments').insert(mapDebtPaymentToDB({ ...initialPayments[0], debtId })));
+      }
+      syncDailyReportsForDates([cleanDate], nextSales, nextDebts);
+    }
+
+    addAuditLog(
+      'Borc Qeydi Əlavə Edildi',
+      `${debt.debtorName}${cleanPhone ? ` (${cleanPhone})` : ''}: ${debt.totalAmount.toFixed(2)} AZN${linkedSale ? ' (Stokdan çıxıldı)' : ''}`
+    );
+    showToast('success', `${cleanName} üçün borc qeydi əlavə edildi.`);
+    return { success: true };
   };
 
   const acceptDebtPayment = async (
@@ -1811,6 +2102,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deletePurchase,
         sales,
         addSale,
+        updateSaleDate,
         confirmSale,
         confirmDaySales,
         deleteSale,

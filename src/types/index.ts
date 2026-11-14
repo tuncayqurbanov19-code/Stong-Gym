@@ -55,16 +55,22 @@ export interface SaleItem {
 
 export interface Sale {
   id: string;
-  date: string; // YYYY-MM-DD
+  date: string; // YYYY-MM-DD (əməliyyatın aid olduğu hesabat tarixi)
   time: string; // HH:mm
   items: SaleItem[];
-  totalAmount: number;
+  subtotalAmount?: number; // Endirimdən əvvəlki cəm
+  discountAmount?: number; // Verilən endirim (AZN)
+  totalAmount: number; // Yekun məbləğ (subtotal - discount)
   paymentType: PaymentType;
   debtorName?: string;
+  debtorPhone?: string;
+  originalDate?: string; // Tarix dəyişdirilibsə ilk əməliyyat tarixi
+  dateChangedAt?: string; // Tarixin son dəyişdirildiyi vaxt
+  updatedAt?: string;
   isConfirmed: boolean;
   confirmedAt?: string;
   confirmedBy?: string;
-  createdAt: string;
+  createdAt: string; // Faktiki sistemə daxil edilmə vaxtı (ISO timestamp)
   createdBy: string;
 }
 
@@ -87,6 +93,7 @@ export type DebtStatus = 'borcdadir' | 'qismen' | 'odanilib';
 export interface DebtRecord {
   id: string;
   debtorName: string;
+  debtorPhone?: string;
   items: {
     productName: string;
     quantity: number;

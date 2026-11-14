@@ -102,8 +102,11 @@ export interface FinancialMetricsSummary {
   startDate: string;
   endDate: string;
   // Satışlar (Gəlir tərəfi)
-  grossSalesTotal: number;      // Ümumi satış məbləği (Nağd + Kart + POS + Balans + Borc)
+  grossBeforeDiscount: number;  // Endirimdən əvvəlki ümumi satış dəyəri
+  totalDiscounts: number;       // Dövrdə verilən endirimlərin cəmi
+  grossSalesTotal: number;      // Ümumi yekun satış məbləği (Nağd + Kart + POS + Balans + Borc)
   salesCount: number;
+  totalItemsSold: number;       // Satılan ümumi məhsul ədədi
   cashSales: number;            // Nağd satış məbləği
   cardSales: number;            // Kartla satış məbləği
   posSales: number;             // POS/Köçürmə satış məbləği
@@ -137,7 +140,7 @@ export interface FinancialMetricsSummary {
 /**
  * Authoritative financial calculation shared across POS, Daily Report, and Dashboard.
  * Rules:
- * 1. Gross sales include all confirmed sales (including credit/'borc' as revenue).
+ * 1. Gross sales include all confirmed sales & credit ('borc') sales as revenue.
  * 2. Credit sales ('borc') NEVER enter actual cash drawer inflow when created.
  * 3. Debt collections enter actual cash drawer inflow on the exact `paidAt` date, separated cleanly as `debtCollectedTotal`.
  * 4. Net cash balance = actualDrawerInflow - (purchases + expenses).
@@ -165,11 +168,22 @@ export function calculateFinancialMetricsForRange(params: {
     s =>
       s.date >= startDate &&
       s.date <= endDate &&
-      (includeUnconfirmedSales || s.isConfirmed)
+      (includeUnconfirmedSales || s.isConfirmed || s.paymentType === 'borc')
   );
 
   const breakdown = calculatePaymentBreakdown(filteredSales);
   const round2 = (v: number) => Math.round(v * 100) / 100;
+
+  let totalDiscounts = 0;
+  let totalItemsSold = 0;
+  for (const s of filteredSales) {
+    totalDiscounts += Number(s.discountAmount) || 0;
+    for (const item of s.items || []) {
+      totalItemsSold += Number(item.quantity) || 0;
+    }
+  }
+  totalDiscounts = round2(totalDiscounts);
+  const grossBeforeDiscount = round2(breakdown.total + totalDiscounts);
 
   const salesRealInflow = round2(breakdown.cash + breakdown.card + breakdown.pos);
 
@@ -222,8 +236,11 @@ export function calculateFinancialMetricsForRange(params: {
   return {
     startDate,
     endDate,
+    grossBeforeDiscount,
+    totalDiscounts,
     grossSalesTotal: round2(breakdown.total),
     salesCount: filteredSales.length,
+    totalItemsSold,
     cashSales: round2(breakdown.cash),
     cardSales: round2(breakdown.card),
     posSales: round2(breakdown.pos),

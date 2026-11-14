@@ -52,9 +52,15 @@ CREATE TABLE IF NOT EXISTS public.sales (
     date TEXT NOT NULL,
     time TEXT NOT NULL,
     items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    subtotal_amount NUMERIC(10, 2),
+    discount_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
     total_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
     payment_type TEXT NOT NULL CHECK (payment_type IN ('naqd', 'kart', 'pos', 'borc', 'balans')),
     debtor_name TEXT,
+    debtor_phone TEXT,
+    original_date TEXT,
+    date_changed_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ,
     is_confirmed BOOLEAN NOT NULL DEFAULT true,
     confirmed_at TIMESTAMPTZ,
     confirmed_by TEXT,
@@ -66,6 +72,7 @@ CREATE TABLE IF NOT EXISTS public.sales (
 CREATE TABLE IF NOT EXISTS public.debts (
     id TEXT PRIMARY KEY,
     debtor_name TEXT NOT NULL,
+    debtor_phone TEXT,
     items JSONB NOT NULL DEFAULT '[]'::jsonb,
     total_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
     paid_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
@@ -336,6 +343,8 @@ CREATE INDEX IF NOT EXISTS idx_debt_payments_debt_id ON public.debt_payments(deb
 CREATE INDEX IF NOT EXISTS idx_debt_payments_paid_at ON public.debt_payments(paid_at);
 CREATE INDEX IF NOT EXISTS idx_debt_payments_received_by ON public.debt_payments(received_by);
 CREATE INDEX IF NOT EXISTS idx_sales_date_created_by ON public.sales(date, created_by);
+CREATE INDEX IF NOT EXISTS idx_sales_date ON public.sales(date);
+CREATE INDEX IF NOT EXISTS idx_debts_status_remaining ON public.debts(status, remaining_amount);
 
 -- =================================================================
 -- ATOMİK RPC FUNKSİYALARI
@@ -644,6 +653,8 @@ AS $$
   ORDER BY total_inflow DESC, staff_name ASC;
 $$;
 
+DROP FUNCTION IF EXISTS public.get_financial_summary(TEXT, TEXT);
+
 CREATE OR REPLACE FUNCTION public.get_financial_summary(
   p_start_date TEXT,
   p_end_date TEXT
@@ -651,6 +662,8 @@ CREATE OR REPLACE FUNCTION public.get_financial_summary(
 RETURNS TABLE (
   gross_sales_total NUMERIC,
   sales_count BIGINT,
+  total_items_sold BIGINT,
+  total_discounts NUMERIC,
   cash_sales NUMERIC,
   card_sales NUMERIC,
   pos_sales NUMERIC,
@@ -672,20 +685,31 @@ RETURNS TABLE (
 LANGUAGE sql
 STABLE
 AS $$
-  WITH s_agg AS (
+  WITH filtered_sales AS (
+    SELECT *
+    FROM public.sales s
+    WHERE (s.is_confirmed = true OR s.payment_type = 'borc')
+      AND s.date >= p_start_date
+      AND s.date <= p_end_date
+  ),
+  s_agg AS (
     SELECT
       COALESCE(SUM(total_amount), 0) AS gross_sales_total,
       COUNT(*) AS sales_count,
+      COALESCE(SUM(COALESCE(discount_amount, 0)), 0) AS total_discounts,
       COALESCE(SUM(CASE WHEN payment_type = 'naqd' THEN total_amount ELSE 0 END), 0) AS cash_sales,
       COALESCE(SUM(CASE WHEN payment_type = 'kart' THEN total_amount ELSE 0 END), 0) AS card_sales,
       COALESCE(SUM(CASE WHEN payment_type = 'pos' THEN total_amount ELSE 0 END), 0) AS pos_sales,
       COALESCE(SUM(CASE WHEN payment_type = 'balans' THEN total_amount ELSE 0 END), 0) AS balance_sales,
       COALESCE(SUM(CASE WHEN payment_type = 'borc' THEN total_amount ELSE 0 END), 0) AS credit_sales,
       COALESCE(SUM(CASE WHEN payment_type IN ('naqd', 'kart', 'pos') THEN total_amount ELSE 0 END), 0) AS sales_real_inflow
-    FROM public.sales
-    WHERE is_confirmed = true
-      AND date >= p_start_date
-      AND date <= p_end_date
+    FROM filtered_sales
+  ),
+  items_agg AS (
+    SELECT
+      COALESCE(SUM(COALESCE((elem->>'quantity')::bigint, 0)), 0) AS total_items_sold
+    FROM filtered_sales fs
+    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(fs.items, '[]'::jsonb)) AS elem
   ),
   dp_agg AS (
     SELECT
@@ -717,6 +741,8 @@ AS $$
   SELECT
     s.gross_sales_total,
     s.sales_count,
+    ia.total_items_sold,
+    s.total_discounts,
     s.cash_sales,
     s.card_sales,
     s.pos_sales,
@@ -734,6 +760,7 @@ AS $$
     (pur.purchases_outflow + exp.expenses_outflow) AS total_cash_outflow,
     ((s.sales_real_inflow + dp.debt_collected_total) - (pur.purchases_outflow + exp.expenses_outflow)) AS net_cash_balance,
     u.total_unpaid_debts
-  FROM s_agg s, dp_agg dp, pur_agg pur, exp_agg exp, unpaid_agg u;
+  FROM s_agg s, items_agg ia, dp_agg dp, pur_agg pur, exp_agg exp, unpaid_agg u;
 $$;
+
 

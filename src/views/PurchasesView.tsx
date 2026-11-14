@@ -7,10 +7,14 @@ import {
   Trash2,
   Search,
   X,
+  Camera,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { formatAZN, formatDateAZ, getTodayISODate } from '../utils/dateUtils';
 import { exportPurchasesToCSV } from '../utils/exportUtils';
+import { findProductByBarcode } from '../utils/barcodeUtils';
+import { playAlertSound, unlockAudioContext } from '../utils/notificationUtils';
+import { BarcodeScannerModal } from '../components/BarcodeScannerModal';
 
 export const PurchasesView: React.FC = () => {
   const { products, purchases, addPurchase, deletePurchase, currentUser, settings, showToast } = useApp();
@@ -18,6 +22,7 @@ export const PurchasesView: React.FC = () => {
   const primaryColor = settings.primaryColor || '#dc2626';
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState(products[0]?.id || '');
   const [quantity, setQuantity] = useState('20');
   const [paidAmount, setPaidAmount] = useState('');
@@ -92,6 +97,27 @@ export const PurchasesView: React.FC = () => {
     );
   });
 
+  const handleBarcodeForPurchase = (code: string) => {
+    const matched = findProductByBarcode(products, code);
+    if (matched) {
+      playAlertSound('success');
+      setSelectedProductId(matched.id);
+      const q = parseFloat(quantity) || 20;
+      setQuantity(String(q));
+      if (matched.buyPrice) {
+        setPaidAmount((q * matched.buyPrice).toFixed(2));
+      } else {
+        setPaidAmount('0');
+      }
+      setDate(getTodayISODate());
+      setIsModalOpen(true);
+      showToast('success', `"${matched.name}" mal qəbulu üçün seçildi.`);
+    } else {
+      playAlertSound('warning');
+      showToast('error', `"${code}" barkodlu məhsul tapılmadı.`);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-12 max-w-7xl mx-auto">
       {/* Header */}
@@ -116,6 +142,18 @@ export const PurchasesView: React.FC = () => {
           >
             <Download className="w-3.5 h-3.5" />
             <span>Excel / CSV</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              unlockAudioContext();
+              setIsScannerOpen(true);
+            }}
+            className="px-3 py-1.5 text-xs font-bold bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
+          >
+            <Camera className="w-3.5 h-3.5 text-red-500" />
+            <span>Barkodla Qəbul</span>
           </button>
 
           <button
@@ -324,9 +362,22 @@ export const PurchasesView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
-                  Məhsul *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
+                    Məhsul *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      unlockAudioContext();
+                      setIsScannerOpen(true);
+                    }}
+                    className="text-[11px] font-bold text-red-600 dark:text-red-400 hover:underline flex items-center gap-1"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Barkod Oxut</span>
+                  </button>
+                </div>
                 <select
                   value={selectedProductId}
                   onChange={e => handleProductSelect(e.target.value)}
@@ -334,7 +385,7 @@ export const PurchasesView: React.FC = () => {
                 >
                   {products.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.name} (Alış: {formatAZN(p.buyPrice)})
+                      {p.name} · [{p.barcode}] (Alış: {formatAZN(p.buyPrice)})
                     </option>
                   ))}
                 </select>
@@ -404,6 +455,13 @@ export const PurchasesView: React.FC = () => {
           </div>
         </div>
       )}
+      {/* Barcode Scanner Modal for Purchase Intake */}
+      <BarcodeScannerModal
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onScan={handleBarcodeForPurchase}
+        title="Mal Qəbulu Üçün Barkod Oxut"
+      />
     </div>
   );
 };

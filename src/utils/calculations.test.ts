@@ -11,7 +11,14 @@ import {
   checkDailyReportDiscrepancy,
   checkCustomerDebt,
   calculateDebtOverview,
+  calculateFinancialMetricsForRange,
 } from './financialCalculations';
+import {
+  normalizeBarcode,
+  findProductByBarcode,
+  hasLongerBarcodePrefix,
+  isRapidScanSequence,
+} from './barcodeUtils';
 import { Product, PurchaseIntake, Sale, DebtRecord, DailyReport } from '../types';
 
 test('Active stock calculation: initial + purchased - sold', () => {
@@ -53,7 +60,7 @@ test('Active stock calculation: initial + purchased - sold', () => {
       createdBy: 'isci',
     },
     {
-      // Unconfirmed sale should not be deducted yet if not confirmed
+      // Unconfirmed card sale should not be deducted yet if not confirmed
       id: 's-2',
       date: '2026-11-03',
       time: '13:00',
@@ -70,6 +77,42 @@ test('Active stock calculation: initial + purchased - sold', () => {
   const stock = calculateProductStock(dummyProduct, purchases, sales, 5);
   assert.equal(stock.activeStock, 90);
   assert.equal(stock.isLowStock, false);
+});
+
+test('Credit (borc) sale deducts stock immediately and consolidates multi-line product quantities', () => {
+  const dummyProduct: Product = {
+    id: 'p-credit',
+    name: 'BCAA',
+    barcode: '47600999',
+    salePrice: 4.0,
+    buyPrice: 2.0,
+    category: 'Əlavələr',
+    initialStock: 20,
+    minStockAlert: 5,
+    createdAt: '2026-11-01',
+  };
+
+  const sales: Sale[] = [
+    {
+      id: 's-borc-1',
+      date: '2026-11-10',
+      time: '15:00',
+      items: [
+        { productId: 'p-credit', productName: 'BCAA', quantity: 2, unitPrice: 4.0, totalPrice: 8.0 },
+        { productId: 'p-credit', productName: 'BCAA', quantity: 3, unitPrice: 4.0, totalPrice: 12.0 },
+      ],
+      totalAmount: 20.0,
+      paymentType: 'borc',
+      debtorName: 'Kamran',
+      isConfirmed: false, // Even if unconfirmed flag is false, borc deducts immediately
+      createdAt: '2026-11-10T15:00:00Z',
+      createdBy: 'isci',
+    },
+  ];
+
+  const stock = calculateProductStock(dummyProduct, [], sales, 5);
+  assert.equal(stock.totalSold, 5);
+  assert.equal(stock.activeStock, 15);
 });
 
 test('Low stock trigger when active stock <= minStockAlert', () => {
@@ -171,6 +214,106 @@ test('Payment breakdown splits into Cash, Card, POS, and Debt', () => {
   assert.equal(breakdown.total, 115);
 });
 
+test('Financial metrics separate discounts, sold items, credit exclusion, and paidAt debt collection', () => {
+  const sales: Sale[] = [
+    {
+      id: 's-cash',
+      date: '2026-11-14',
+      time: '10:00',
+      items: [{ productId: 'p1', productName: 'Su', quantity: 4, unitPrice: 2.5, totalPrice: 10 }],
+      subtotalAmount: 10,
+      discountAmount: 2,
+      totalAmount: 8,
+      paymentType: 'naqd',
+      isConfirmed: true,
+      createdAt: '2026-11-14T10:00:00Z',
+      createdBy: 'isci',
+    },
+    {
+      id: 's-credit',
+      date: '2026-11-14',
+      time: '11:00',
+      items: [{ productId: 'p2', productName: 'Shake', quantity: 2, unitPrice: 5, totalPrice: 10 }],
+      subtotalAmount: 10,
+      discountAmount: 0,
+      totalAmount: 10,
+      paymentType: 'borc',
+      debtorName: 'Rəşad',
+      isConfirmed: true,
+      createdAt: '2026-11-14T11:00:00Z',
+      createdBy: 'isci',
+    },
+  ];
+
+  const debts: DebtRecord[] = [
+    {
+      id: 'd-old',
+      debtorName: 'Əli',
+      debtorPhone: '0501112233',
+      items: [{ productName: 'Protein', quantity: 1, unitPrice: 12 }],
+      totalAmount: 12,
+      paidAmount: 5,
+      remainingAmount: 7,
+      date: '2026-11-10',
+      status: 'qismen',
+      payments: [
+        {
+          id: 'pay-1',
+          debtId: 'd-old',
+          date: '2026-11-14',
+          paidAt: '2026-11-14',
+          amount: 5,
+          paymentMethod: 'kart',
+          receivedBy: 'admin',
+          createdAt: '2026-11-14T12:00:00Z',
+        },
+      ],
+      createdAt: '2026-11-10T09:00:00Z',
+      updatedAt: '2026-11-14T12:00:00Z',
+    },
+    {
+      id: 'd-new',
+      debtorName: 'Rəşad',
+      items: [{ productName: 'Shake', quantity: 2, unitPrice: 5 }],
+      totalAmount: 10,
+      paidAmount: 0,
+      remainingAmount: 10,
+      date: '2026-11-14',
+      status: 'borcdadir',
+      payments: [],
+      createdAt: '2026-11-14T11:00:00Z',
+      updatedAt: '2026-11-14T11:00:00Z',
+    },
+  ];
+
+  const metricsToday = calculateFinancialMetricsForRange({
+    sales,
+    debts,
+    startDate: '2026-11-14',
+    endDate: '2026-11-14',
+  });
+
+  assert.equal(metricsToday.grossSalesTotal, 18); // 8 cash + 10 credit
+  assert.equal(metricsToday.totalDiscounts, 2);
+  assert.equal(metricsToday.grossBeforeDiscount, 20);
+  assert.equal(metricsToday.totalItemsSold, 6); // 4 + 2
+  assert.equal(metricsToday.cashSales, 8);
+  assert.equal(metricsToday.creditSales, 10);
+  assert.equal(metricsToday.debtCollectedCard, 5);
+  assert.equal(metricsToday.actualDrawerInflow, 13); // 8 cash + 5 debt card (credit excluded!)
+  assert.equal(metricsToday.totalUnpaidDebts, 17); // 7 + 10
+
+  // Earlier date should NOT see the 2026-11-14 payment in its drawer inflow
+  const metricsNov10 = calculateFinancialMetricsForRange({
+    sales,
+    debts,
+    startDate: '2026-11-10',
+    endDate: '2026-11-10',
+  });
+  assert.equal(metricsNov10.actualDrawerInflow, 0);
+  assert.equal(metricsNov10.debtCollectedTotal, 0);
+});
+
 test('Customer existing debt check detects previous unpaid debt and formats message', () => {
   const debts: DebtRecord[] = [
     {
@@ -204,13 +347,17 @@ test('Customer existing debt check detects previous unpaid debt and formats mess
   const checkEli = checkCustomerDebt('əli ', debts);
   assert.equal(checkEli.hasDebt, true);
   assert.equal(checkEli.totalRemainingDebt, 2.0);
-  assert.match(checkEli.warningMessage, /Əli adlı müştərinin 2.00 AZN borcu var idi!/);
+  assert.match(checkEli.warningMessage, /Əli adlı müştərinin 2.00 (AZN|₼) borcu var idi!/);
 
   const checkVeli = checkCustomerDebt('Vəli', debts);
   assert.equal(checkVeli.hasDebt, false);
 
   const checkMurad = checkCustomerDebt('Murad', debts);
   assert.equal(checkMurad.hasDebt, false);
+
+  const overview = calculateDebtOverview(debts);
+  assert.equal(overview.totalRemainingDebt, 2.0);
+  assert.equal(overview.unpaidDebtorsCount, 1);
 });
 
 test('Daily report discrepancy check: exact match vs discrepancy', () => {
@@ -253,3 +400,67 @@ test('Daily report discrepancy check: exact match vs discrepancy', () => {
   assert.equal(mismatchRes.isMatching, false);
   assert.match(mismatchRes.message, /Fərq var – yoxlayın/);
 });
+
+test('POS barcode scanner matching supports exact, whitespace/newline trim, leading zero strip, prefix safety, and rapid burst detection', () => {
+  const sampleProducts: Product[] = [
+    {
+      id: 'p-1',
+      name: 'Protein (iso)',
+      barcode: '47600106',
+      salePrice: 6,
+      buyPrice: 3,
+      category: 'Protein',
+      initialStock: 10,
+      minStockAlert: 5,
+      createdAt: '',
+    },
+    {
+      id: 'p-2',
+      name: '0.5L Su',
+      barcode: '05su',
+      salePrice: 0.6,
+      buyPrice: 0.3,
+      category: 'Su',
+      initialStock: 20,
+      minStockAlert: 5,
+      createdAt: '',
+    },
+    {
+      id: 'p-3',
+      name: 'Kreatin',
+      barcode: '10',
+      salePrice: 3,
+      buyPrice: 1.5,
+      category: 'Protein',
+      initialStock: 10,
+      minStockAlert: 5,
+      createdAt: '',
+    },
+    {
+      id: 'p-4',
+      name: 'BCAA',
+      barcode: '1050',
+      salePrice: 4,
+      buyPrice: 2,
+      category: 'Protein',
+      initialStock: 10,
+      minStockAlert: 5,
+      createdAt: '',
+    },
+  ];
+
+  assert.equal(normalizeBarcode('  47600106\r\n\t '), '47600106');
+  assert.equal(findProductByBarcode(sampleProducts, '47600106\n')?.id, 'p-1');
+  assert.equal(findProductByBarcode(sampleProducts, '047600106')?.id, 'p-1');
+  assert.equal(findProductByBarcode(sampleProducts, '05SU')?.id, 'p-2');
+  assert.equal(findProductByBarcode(sampleProducts, '999999'), undefined);
+
+  // Prefix ambiguity check prevents early trigger on '10' when '1050' exists
+  assert.equal(hasLongerBarcodePrefix(sampleProducts, '10', 'p-3'), true);
+  assert.equal(hasLongerBarcodePrefix(sampleProducts, '47600106', 'p-1'), false);
+
+  // Rapid HID hardware scanner timing vs slow manual typing
+  assert.equal(isRapidScanSequence([18, 22, 15, 25, 19]), true);
+  assert.equal(isRapidScanSequence([160, 210, 140, 195]), false);
+});
+
