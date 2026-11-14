@@ -633,10 +633,11 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
         debts,
         purchases,
         expenses,
+        customerAccounts,
         startDate: todayISO,
         endDate: todayISO,
       }),
-    [sales, debts, purchases, expenses, todayISO]
+    [sales, debts, purchases, expenses, customerAccounts, todayISO]
   );
 
   // Normalized date range for History/Daily tab
@@ -683,11 +684,12 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
         debts,
         purchases,
         expenses,
+        customerAccounts,
         startDate: effectiveStart || '2000-01-01',
         endDate: effectiveEnd || '2099-12-31',
         includeUnconfirmedSales: true,
       }),
-    [filteredHistorySales, debts, purchases, expenses, effectiveStart, effectiveEnd]
+    [filteredHistorySales, debts, purchases, expenses, customerAccounts, effectiveStart, effectiveEnd]
   );
 
   const dayConfirmed =

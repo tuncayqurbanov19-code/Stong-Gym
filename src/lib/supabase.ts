@@ -6,6 +6,10 @@ import {
   Sale,
   DebtRecord,
   CustomerAccount,
+  CustomerTransaction,
+  CustomerTransactionType,
+  DepoMovement,
+  DepoMovementType,
   DailyReport,
   Expense,
   AppSettings,
@@ -412,6 +416,24 @@ export function mapCustomerAccountToDB(c: CustomerAccount) {
     balance: c.balance,
     total_deposited: c.totalDeposited,
     total_spent: c.totalSpent,
+    total_withdrawn: c.totalWithdrawn ?? 0,
+    opened_date: c.openedDate || (c.createdAt ? c.createdAt.slice(0, 10) : null),
+    notes: c.notes || null,
+    transactions: c.transactions || [],
+    created_at: c.createdAt,
+    updated_at: c.updatedAt,
+    updated_by: c.updatedBy || null,
+  };
+}
+
+export function mapCustomerAccountToLegacyDB(c: CustomerAccount) {
+  return {
+    id: c.id,
+    name: c.name,
+    phone: c.phone || null,
+    balance: c.balance,
+    total_deposited: c.totalDeposited,
+    total_spent: c.totalSpent,
     notes: c.notes || null,
     transactions: c.transactions || [],
     created_at: c.createdAt,
@@ -420,6 +442,12 @@ export function mapCustomerAccountToDB(c: CustomerAccount) {
 }
 
 export function mapDBToCustomerAccount(row: any): CustomerAccount {
+  const txs: CustomerTransaction[] = Array.isArray(row.transactions) ? row.transactions : [];
+  const fallbackOpened =
+    row.opened_date ||
+    (txs.length > 0 ? txs[txs.length - 1]?.date : undefined) ||
+    (row.created_at ? String(row.created_at).slice(0, 10) : undefined);
+
   return {
     id: row.id,
     name: row.name,
@@ -427,10 +455,107 @@ export function mapDBToCustomerAccount(row: any): CustomerAccount {
     balance: Number(row.balance) || 0,
     totalDeposited: Number(row.total_deposited) || 0,
     totalSpent: Number(row.total_spent) || 0,
+    totalWithdrawn: Number(row.total_withdrawn) || 0,
+    openedDate: fallbackOpened,
     notes: row.notes || undefined,
-    transactions: Array.isArray(row.transactions) ? row.transactions : [],
+    transactions: txs,
     createdAt: row.created_at || new Date().toISOString(),
     updatedAt: row.updated_at || new Date().toISOString(),
+    updatedBy: row.updated_by || undefined,
+  };
+}
+
+export function mapCustomerBalanceTxToDB(tx: CustomerTransaction, customerId: string, customerName: string) {
+  return {
+    id: tx.id,
+    customer_id: customerId,
+    customer_name: customerName,
+    tx_type: tx.type,
+    amount: Number(tx.amount) || 0,
+    balance_before: Number(tx.balanceBefore) || 0,
+    balance_after: Number(tx.balanceAfter) || 0,
+    payment_method: tx.paymentMethod || null,
+    product_id: tx.productId || null,
+    product_name: tx.productName || null,
+    quantity: tx.quantity ?? null,
+    unit_price: tx.unitPrice ?? null,
+    sale_id: tx.saleId || null,
+    tx_date: tx.date,
+    tx_time: tx.time || '00:00',
+    note: tx.note || null,
+    created_by: tx.createdBy || 'admin',
+    idempotency_key: tx.idempotencyKey || null,
+    created_at: tx.createdAt || new Date().toISOString(),
+  };
+}
+
+export function mapDBToCustomerBalanceTx(row: any): CustomerTransaction {
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    customerName: row.customer_name,
+    type: (row.tx_type || 'deposit') as CustomerTransactionType,
+    amount: Number(row.amount) || 0,
+    balanceBefore: row.balance_before !== null && row.balance_before !== undefined ? Number(row.balance_before) : undefined,
+    balanceAfter: row.balance_after !== null && row.balance_after !== undefined ? Number(row.balance_after) : undefined,
+    paymentMethod: row.payment_method || undefined,
+    productId: row.product_id || undefined,
+    productName: row.product_name || undefined,
+    quantity: row.quantity !== null && row.quantity !== undefined ? Number(row.quantity) : undefined,
+    unitPrice: row.unit_price !== null && row.unit_price !== undefined ? Number(row.unit_price) : undefined,
+    saleId: row.sale_id || undefined,
+    date: row.tx_date,
+    time: row.tx_time || '00:00',
+    note: row.note || undefined,
+    createdBy: row.created_by || 'admin',
+    idempotencyKey: row.idempotency_key || undefined,
+    createdAt: row.created_at || new Date().toISOString(),
+  };
+}
+
+export function mapDepoMovementToDB(m: DepoMovement) {
+  return {
+    id: m.id,
+    movement_type: m.movementType,
+    product_id: m.productId,
+    product_name: m.productName,
+    quantity_delta: Math.trunc(Number(m.quantityDelta) || 0),
+    stock_before: m.stockBefore ?? null,
+    stock_after: m.stockAfter ?? null,
+    unit_price: m.unitPrice ?? null,
+    total_amount: m.totalAmount ?? null,
+    customer_name: m.customerName || null,
+    reference_id: m.referenceId || null,
+    movement_date: m.date,
+    movement_time: m.time || '00:00',
+    source_label: m.sourceLabel || null,
+    note: m.note || null,
+    created_by: m.createdBy || 'admin',
+    idempotency_key: m.idempotencyKey || null,
+    created_at: m.createdAt || new Date().toISOString(),
+  };
+}
+
+export function mapDBToDepoMovement(row: any): DepoMovement {
+  return {
+    id: row.id,
+    movementType: (row.movement_type || 'manual_adjustment') as DepoMovementType,
+    productId: row.product_id,
+    productName: row.product_name,
+    quantityDelta: Number(row.quantity_delta) || 0,
+    stockBefore: row.stock_before !== null && row.stock_before !== undefined ? Number(row.stock_before) : undefined,
+    stockAfter: row.stock_after !== null && row.stock_after !== undefined ? Number(row.stock_after) : undefined,
+    unitPrice: row.unit_price !== null && row.unit_price !== undefined ? Number(row.unit_price) : undefined,
+    totalAmount: row.total_amount !== null && row.total_amount !== undefined ? Number(row.total_amount) : undefined,
+    customerName: row.customer_name || undefined,
+    referenceId: row.reference_id || undefined,
+    date: row.movement_date,
+    time: row.movement_time || '00:00',
+    sourceLabel: row.source_label || undefined,
+    note: row.note || undefined,
+    createdBy: row.created_by || 'admin',
+    idempotencyKey: row.idempotency_key || undefined,
+    createdAt: row.created_at || new Date().toISOString(),
   };
 }
 

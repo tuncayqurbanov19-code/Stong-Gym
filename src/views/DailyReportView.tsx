@@ -16,10 +16,17 @@ import {
   PackageCheck,
   Percent,
   Coins,
+  ShoppingBag,
+  ArrowUpRight,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
 import { formatAZN, formatDateAZ, getTodayISODate, getCurrentMonthKey } from '../utils/dateUtils';
-import { calculateFinancialMetricsForRange, calculateNetProfit } from '../utils/financialCalculations';
+import {
+  calculateFinancialMetricsForRange,
+  calculateNetProfit,
+  extractBalanceCashWithdrawals,
+  extractBalanceProductWithdrawals,
+} from '../utils/financialCalculations';
 import { exportDailyReportsToCSV } from '../utils/exportUtils';
 import { StaffPaymentBreakdown } from '../components/StaffPaymentBreakdown';
 
@@ -30,6 +37,7 @@ export const DailyReportView: React.FC = () => {
     debts,
     purchases,
     expenses,
+    customerAccounts,
     saveDailyReport,
     currentUser,
     settings,
@@ -55,10 +63,21 @@ export const DailyReportView: React.FC = () => {
         debts,
         purchases,
         expenses,
+        customerAccounts,
         startDate: selectedDate,
         endDate: selectedDate,
       }),
-    [sales, debts, purchases, expenses, selectedDate]
+    [sales, debts, purchases, expenses, customerAccounts, selectedDate]
+  );
+
+  const balanceProductWithdrawals = useMemo(
+    () => extractBalanceProductWithdrawals(sales, selectedDate, selectedDate),
+    [sales, selectedDate]
+  );
+
+  const balanceCashWithdrawalsList = useMemo(
+    () => extractBalanceCashWithdrawals(customerAccounts, selectedDate, selectedDate),
+    [customerAccounts, selectedDate]
   );
 
   const dayProfit = useMemo(
@@ -339,6 +358,204 @@ export const DailyReportView: React.FC = () => {
         </div>
       </section>
 
+      {/* 3-Category Daily Sales & Balance Operations Breakdown */}
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-xs font-extrabold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+            {formatDateAZ(selectedDate)} — Satış və Müştəri Balansı Əməliyyatları Bölgüsü (3 Kateqoriya)
+          </h3>
+          <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
+            Balans açılışı/artımı və sərbəst pul çıxarışı satış dövriyyəsinə daxil edilmir
+          </span>
+        </div>
+
+        {/* Summary Cards for 3 Categories */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Category 1: Normal POS Sales */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-zinc-700 dark:text-zinc-200">
+                1. Adi Satışlar
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300">
+                {dayMetrics.normalSalesCount} əməliyyat
+              </span>
+            </div>
+            <div className="text-2xl font-black font-mono tabular-nums text-zinc-900 dark:text-white">
+              {formatAZN(dayMetrics.normalSalesTotal)}
+            </div>
+            <div className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono tabular-nums flex flex-wrap gap-x-2 gap-y-0.5">
+              <span>Nağd: {formatAZN(dayMetrics.cashSales)}</span>
+              <span>· Kart/POS: {formatAZN(cardTotal)}</span>
+              <span>· Nisyə: {formatAZN(dayMetrics.creditSales)}</span>
+            </div>
+          </div>
+
+          {/* Category 2: Balance Product Withdrawals */}
+          <div className="p-4 rounded-2xl bg-cyan-50/70 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-900/60 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-cyan-800 dark:text-cyan-300 flex items-center gap-1.5">
+                <ShoppingBag className="w-3.5 h-3.5" />
+                <span>2. Balansdan Məhsul Çıxarışları</span>
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-cyan-100 dark:bg-cyan-900/60 text-cyan-800 dark:text-cyan-300">
+                {dayMetrics.balanceProductOutCount} əməliyyat
+              </span>
+            </div>
+            <div className="text-2xl font-black font-mono tabular-nums text-cyan-700 dark:text-cyan-300">
+              {formatAZN(dayMetrics.balanceSales)}
+            </div>
+            <div className="text-[11px] text-cyan-800/80 dark:text-cyan-300/80 font-semibold">
+              Günlük satış dövriyyəsinə daxildir · Depodan avtomatik çıxılıb
+            </div>
+          </div>
+
+          {/* Category 3: Free Cash Withdrawals from Balance */}
+          <div className="p-4 rounded-2xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/60 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold uppercase tracking-wider text-rose-800 dark:text-rose-300 flex items-center gap-1.5">
+                <ArrowUpRight className="w-3.5 h-3.5" />
+                <span>3. Balansdan Sərbəst Pul Çıxarışları</span>
+              </span>
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-900/60 text-rose-800 dark:text-rose-300">
+                {dayMetrics.balanceCashWithdrawalsCount} əməliyyat
+              </span>
+            </div>
+            <div className="text-2xl font-black font-mono tabular-nums text-rose-700 dark:text-rose-400">
+              − {formatAZN(dayMetrics.balanceCashWithdrawals)}
+            </div>
+            <div className="text-[11px] text-rose-800/80 dark:text-rose-300/80 font-semibold">
+              Satış gəliri deyil · Kassadan faktiki pul çıxışı kimi hesablanır
+            </div>
+          </div>
+        </div>
+
+        {/* Detailed Tables for Category 2 & Category 3 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Balance Product Withdrawals Table */}
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+            <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-bold text-zinc-900 dark:text-white flex items-center gap-1.5">
+                  <ShoppingBag className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                  <span>Balansdan Məhsul Çıxarışları Siyahısı</span>
+                </h4>
+                <p className="text-[10px] text-zinc-500">
+                  Məhsul adı, sayı, vahid qiyməti, ümumi dəyər, müştəri, tarix və saat
+                </p>
+              </div>
+              <span className="font-mono text-xs font-bold text-cyan-600 dark:text-cyan-400">
+                {formatAZN(dayMetrics.balanceSales)}
+              </span>
+            </div>
+
+            {balanceProductWithdrawals.length === 0 ? (
+              <p className="p-6 text-center text-xs text-zinc-500">
+                Seçilmiş gündə balansdan məhsul çıxarışı olmayıb.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs min-w-[520px]">
+                  <thead className="bg-zinc-50 dark:bg-zinc-950 text-[10px] uppercase text-zinc-500 border-b border-zinc-200 dark:border-zinc-800">
+                    <tr>
+                      <th className="py-2 px-3">Məhsul</th>
+                      <th className="py-2 px-3 text-right">Say</th>
+                      <th className="py-2 px-3 text-right">Vahid</th>
+                      <th className="py-2 px-3 text-right">Cəmi</th>
+                      <th className="py-2 px-3">Müştəri</th>
+                      <th className="py-2 px-3">Tarix / Saat</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                    {balanceProductWithdrawals.map(item => (
+                      <tr key={item.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-950/60">
+                        <td className="py-2 px-3 font-semibold text-zinc-900 dark:text-white">
+                          {item.productName}
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono tabular-nums">
+                          {item.quantity} əd.
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono tabular-nums text-zinc-500">
+                          {formatAZN(item.unitPrice)}
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono tabular-nums font-bold text-cyan-700 dark:text-cyan-400">
+                          {formatAZN(item.totalAmount)}
+                        </td>
+                        <td className="py-2 px-3 font-medium text-zinc-800 dark:text-zinc-200">
+                          {item.customerName}
+                        </td>
+                        <td className="py-2 px-3 font-mono text-[11px] text-zinc-500 whitespace-nowrap">
+                          {formatDateAZ(item.date)} {item.time}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Balance Free Cash Withdrawals Table */}
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+            <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-bold text-zinc-900 dark:text-white flex items-center gap-1.5">
+                  <ArrowUpRight className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                  <span>Balansdan Sərbəst Pul Çıxarışları</span>
+                </h4>
+                <p className="text-[10px] text-zinc-500">
+                  Satış gəliri hesab edilmir · Kassa çıxışı kimi əks olunur
+                </p>
+              </div>
+              <span className="font-mono text-xs font-bold text-rose-600 dark:text-rose-400">
+                − {formatAZN(dayMetrics.balanceCashWithdrawals)}
+              </span>
+            </div>
+
+            {balanceCashWithdrawalsList.length === 0 ? (
+              <p className="p-6 text-center text-xs text-zinc-500">
+                Seçilmiş gündə balansdan sərbəst pul çıxarışı olmayıb.
+              </p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs min-w-[460px]">
+                  <thead className="bg-zinc-50 dark:bg-zinc-950 text-[10px] uppercase text-zinc-500 border-b border-zinc-200 dark:border-zinc-800">
+                    <tr>
+                      <th className="py-2 px-3">Müştəri</th>
+                      <th className="py-2 px-3 text-right">Məbləğ (−)</th>
+                      <th className="py-2 px-3">Üsul</th>
+                      <th className="py-2 px-3">Tarix / Saat</th>
+                      <th className="py-2 px-3">Qeyd</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                    {balanceCashWithdrawalsList.map(w => (
+                      <tr key={w.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-950/60">
+                        <td className="py-2 px-3 font-semibold text-zinc-900 dark:text-white">
+                          {w.customerName}
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono tabular-nums font-bold text-rose-600 dark:text-rose-400">
+                          − {formatAZN(w.amount)}
+                        </td>
+                        <td className="py-2 px-3 uppercase font-bold text-[10px] text-zinc-600 dark:text-zinc-300">
+                          {w.paymentMethod}
+                        </td>
+                        <td className="py-2 px-3 font-mono text-[11px] text-zinc-500 whitespace-nowrap">
+                          {formatDateAZ(w.date)} {w.time}
+                        </td>
+                        <td className="py-2 px-3 text-[11px] text-zinc-500 truncate max-w-[160px]">
+                          {w.note || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+
       {/* Staff × Payment Method Breakdown Section */}
       <StaffPaymentBreakdown defaultDate={selectedDate} />
 
@@ -540,6 +757,30 @@ export const DailyReportView: React.FC = () => {
                 </span>
                 <span className="font-mono tabular-nums font-bold text-zinc-900 dark:text-white">
                   {formatAZN(dayInflowStats.expectedTotal)}
+                </span>
+              </div>
+              <div className="py-2.5 flex justify-between">
+                <span className="text-zinc-500 dark:text-zinc-400">
+                  Balansdan Məhsul (Satışa daxil, yeni pul girmir):
+                </span>
+                <span className="font-mono tabular-nums font-semibold text-cyan-600 dark:text-cyan-400">
+                  {formatAZN(dayMetrics.balanceSales)}
+                </span>
+              </div>
+              <div className="py-2.5 flex justify-between">
+                <span className="text-zinc-500 dark:text-zinc-400">
+                  Balansdan Sərbəst Pul Çıxışı (−):
+                </span>
+                <span className="font-mono tabular-nums font-semibold text-rose-600 dark:text-rose-400">
+                  − {formatAZN(dayMetrics.balanceCashWithdrawals)}
+                </span>
+              </div>
+              <div className="py-2.5 flex justify-between">
+                <span className="text-zinc-700 dark:text-zinc-300 font-semibold">
+                  Xalis Kassa Balansı (Daxil − Alış/Xərc/Pul Çıxışı):
+                </span>
+                <span className="font-mono tabular-nums font-bold text-emerald-600 dark:text-emerald-400">
+                  {formatAZN(dayMetrics.netCashBalance)}
                 </span>
               </div>
               <div className="py-2.5 flex justify-between">

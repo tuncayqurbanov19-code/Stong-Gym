@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus,
   Search,
@@ -14,11 +14,14 @@ import {
   ScanBarcode,
   CheckCircle2,
   SlidersHorizontal,
+  History,
+  ArrowDownLeft,
+  ArrowUpRight,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { Product } from '../types';
-import { formatAZN } from '../utils/dateUtils';
-import { calculateProductStock } from '../utils/stockCalculations';
+import { DepoMovementType, Product } from '../types';
+import { formatAZN, formatDateAZ } from '../utils/dateUtils';
+import { buildDepoMovementsLedger, calculateProductStock } from '../utils/stockCalculations';
 import {
   findProductByBarcode,
   hasLongerBarcodePrefix,
@@ -37,6 +40,8 @@ export const ProductsView: React.FC = () => {
     deleteProduct,
     purchases,
     sales,
+    depoMovements,
+    recordManualDepoAdjustment,
     settings,
     currentUser,
     showToast,
@@ -65,6 +70,12 @@ export const ProductsView: React.FC = () => {
   const [quickBarcode, setQuickBarcode] = useState('');
   const [quickSalePrice, setQuickSalePrice] = useState('');
   const [quickBuyPrice, setQuickBuyPrice] = useState('');
+  const [quickAdjustNote, setQuickAdjustNote] = useState('');
+
+  // Depo Movement History Filter State (4 Categories)
+  const [depoCategoryFilter, setDepoCategoryFilter] = useState<'all' | DepoMovementType>('all');
+  const [depoHistorySearch, setDepoHistorySearch] = useState('');
+  const [depoHistoryDate, setDepoHistoryDate] = useState('');
 
   const depoTimerRef = useRef<number | null>(null);
   const depoIntervalsRef = useRef<{ lastTime: number; intervals: number[] }>({
@@ -141,25 +152,30 @@ export const ProductsView: React.FC = () => {
     setQuickBarcode(p.barcode);
     setQuickSalePrice(String(p.salePrice));
     setQuickBuyPrice(String(p.buyPrice));
+    setQuickAdjustNote('');
   };
 
-  const handleSaveQuickAdjust = (e: React.FormEvent) => {
+  const handleSaveQuickAdjust = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickAdjustProduct) return;
 
-    const stock = calculateProductStock(quickAdjustProduct, purchases, sales, settings.minStockThreshold);
     const parsedTarget = Math.max(0, parseInt(targetActiveStock, 10) || 0);
-    // Aktiv Qalıq = initialStock + purchased - sold  =>  yeni initialStock = target - purchased + sold
-    const newInitialStock = Math.max(0, parsedTarget - stock.totalPurchased + stock.totalSold);
     const sPrice = parseFloat(quickSalePrice);
     const bPrice = parseFloat(quickBuyPrice);
 
-    updateProduct(quickAdjustProduct.id, {
-      initialStock: newInitialStock,
+    const res = await recordManualDepoAdjustment({
+      productId: quickAdjustProduct.id,
+      targetActiveStock: parsedTarget,
       barcode: quickBarcode.trim() || quickAdjustProduct.barcode,
       salePrice: Number.isFinite(sPrice) && sPrice >= 0 ? sPrice : quickAdjustProduct.salePrice,
       buyPrice: Number.isFinite(bPrice) && bPrice >= 0 ? bPrice : quickAdjustProduct.buyPrice,
+      note: quickAdjustNote.trim() || undefined,
     });
+
+    if (!res.success) {
+      showToast('error', res.error || 'Depo qalığı yenilənmədi.');
+      return;
+    }
 
     playAlertSound('success');
     showToast(
@@ -168,6 +184,33 @@ export const ProductsView: React.FC = () => {
     );
     setQuickAdjustProduct(null);
   };
+
+  // Unified 4-Category Depo Movement Ledger
+  const depoLedger = useMemo(
+    () =>
+      buildDepoMovementsLedger({
+        purchases,
+        sales,
+        manualAdjustments: depoMovements,
+      }),
+    [purchases, sales, depoMovements]
+  );
+
+  const filteredDepoMovements = useMemo(() => {
+    const q = depoHistorySearch.trim().toLowerCase();
+    return depoLedger.movements.filter(m => {
+      if (depoCategoryFilter !== 'all' && m.movementType !== depoCategoryFilter) return false;
+      if (depoHistoryDate && m.date !== depoHistoryDate) return false;
+      if (q) {
+        const matchProd = m.productName.toLowerCase().includes(q);
+        const matchCust = (m.customerName || '').toLowerCase().includes(q);
+        const matchNote = (m.note || '').toLowerCase().includes(q);
+        const matchLabel = (m.sourceLabel || '').toLowerCase().includes(q);
+        if (!matchProd && !matchCust && !matchNote && !matchLabel) return false;
+      }
+      return true;
+    });
+  }, [depoLedger, depoCategoryFilter, depoHistorySearch, depoHistoryDate]);
 
   const handleDepoBarcodeScan = (rawCode: string, autoOpenAdjust = true) => {
     const clean = normalizeBarcode(rawCode);
@@ -813,6 +856,163 @@ export const ProductsView: React.FC = () => {
         </div>
       )}
 
+      {/* Depo Hərəkət Tarixçəsi (4 Kateqoriya: Adi satış, Balans çıxarışı, Mal qəbulu, Əl ilə düzəliş) */}
+      <section className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 p-5 sm:p-6 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-zinc-200 dark:border-zinc-800">
+          <div>
+            <h3 className="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+              <History className="w-4 h-4 text-red-500" />
+              <span>Depo Hərəkət Tarixçəsi (4 Kateqoriya)</span>
+            </h3>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+              Adi satışlar, müştəri balansından çıxarışlar, anbara mal daxilolmaları və əl ilə depo düzəlişləri
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono tabular-nums">
+            <span className="px-2.5 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-bold">
+              Adi satış: −{depoLedger.normalSaleOutQty} əd.
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800 font-bold">
+              Balansdan: −{depoLedger.balanceProductOutQty} əd.
+            </span>
+            <span className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-bold">
+              Qəbul: +{depoLedger.purchaseInQty} əd.
+            </span>
+          </div>
+        </div>
+
+        {/* Category Filter Tabs & Search */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              [
+                { id: 'all', label: `Hamısı (${depoLedger.movements.length})` },
+                { id: 'normal_sale_out', label: `Adi satışdan çıxanlar (${depoLedger.counts.normal_sale_out})` },
+                { id: 'balance_product_out', label: `Balansdan çıxanlar (${depoLedger.counts.balance_product_out})` },
+                { id: 'purchase_in', label: `Anbara daxil olanlar (${depoLedger.counts.purchase_in})` },
+                { id: 'manual_adjustment', label: `Əl ilə düzəlişlər (${depoLedger.counts.manual_adjustment})` },
+              ] as const
+            ).map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setDepoCategoryFilter(tab.id)}
+                style={depoCategoryFilter === tab.id ? { backgroundColor: primaryColor } : undefined}
+                className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all whitespace-nowrap ${
+                  depoCategoryFilter === tab.id
+                    ? 'text-white shadow-xs'
+                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 sm:w-52">
+              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <input
+                type="text"
+                value={depoHistorySearch}
+                onChange={e => setDepoHistorySearch(e.target.value)}
+                placeholder="Məhsul, müştəri, qeyd..."
+                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+              />
+            </div>
+            <input
+              type="date"
+              value={depoHistoryDate}
+              onChange={e => setDepoHistoryDate(e.target.value)}
+              aria-label="Depo tarixçə tarixi"
+              className="px-2.5 py-1.5 text-xs font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+            />
+            {depoHistoryDate && (
+              <button
+                type="button"
+                onClick={() => setDepoHistoryDate('')}
+                className="p-1.5 rounded-xl border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                title="Tarixi təmizlə"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Movements Table */}
+        {filteredDepoMovements.length === 0 ? (
+          <div className="py-10 text-center text-xs text-zinc-500">
+            Seçilmiş filtr üzrə depo hərəkəti tapılmadı.
+          </div>
+        ) : (
+          <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-2xl">
+            <table className="w-full text-left text-xs min-w-[780px]">
+              <thead className="bg-zinc-50 dark:bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-500 border-b border-zinc-200 dark:border-zinc-800">
+                <tr>
+                  <th className="py-2.5 px-3.5">Tarix & Saat</th>
+                  <th className="py-2.5 px-3.5">Kateqoriya / Mənbə</th>
+                  <th className="py-2.5 px-3.5">Məhsul</th>
+                  <th className="py-2.5 px-3.5 text-right">Say Dəyişimi</th>
+                  <th className="py-2.5 px-3.5 text-right">Məbləğ</th>
+                  <th className="py-2.5 px-3.5">Müştəri / Qeyd</th>
+                  <th className="py-2.5 px-3.5">Məsul</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                {filteredDepoMovements.slice(0, 100).map(m => {
+                  const isPositive = m.quantityDelta > 0;
+                  let badgeCls = 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700';
+                  if (m.movementType === 'balance_product_out') {
+                    badgeCls = 'bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800';
+                  } else if (m.movementType === 'purchase_in') {
+                    badgeCls = 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800';
+                  } else if (m.movementType === 'manual_adjustment') {
+                    badgeCls = 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800';
+                  }
+
+                  return (
+                    <tr key={m.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-950/60">
+                      <td className="py-2.5 px-3.5 font-mono tabular-nums text-[11px] text-zinc-600 dark:text-zinc-400 whitespace-nowrap">
+                        {formatDateAZ(m.date)} {m.time}
+                      </td>
+                      <td className="py-2.5 px-3.5">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-[10px] font-bold whitespace-nowrap ${badgeCls}`}>
+                          {isPositive ? (
+                            <ArrowDownLeft className="w-3 h-3" />
+                          ) : (
+                            <ArrowUpRight className="w-3 h-3" />
+                          )}
+                          <span>{m.sourceLabel}</span>
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3.5 font-semibold text-zinc-900 dark:text-white">
+                        {m.productName}
+                      </td>
+                      <td className={`py-2.5 px-3.5 text-right font-mono tabular-nums font-bold ${isPositive ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {isPositive ? `+${m.quantityDelta}` : m.quantityDelta} əd.
+                      </td>
+                      <td className="py-2.5 px-3.5 text-right font-mono tabular-nums text-zinc-700 dark:text-zinc-300">
+                        {m.totalAmount !== undefined ? formatAZN(m.totalAmount) : '—'}
+                      </td>
+                      <td className="py-2.5 px-3.5 text-[11px] text-zinc-600 dark:text-zinc-400 max-w-[220px] truncate">
+                        {m.customerName ? (
+                          <strong className="text-zinc-900 dark:text-zinc-200 mr-1">{m.customerName}</strong>
+                        ) : null}
+                        {m.note || '—'}
+                      </td>
+                      <td className="py-2.5 px-3.5 font-mono text-[11px] text-zinc-500">
+                        @{m.createdBy || 'sistem'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       {/* Create / Edit Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in">
@@ -1127,6 +1327,19 @@ export const ProductsView: React.FC = () => {
                     className="w-full px-3.5 py-2 text-sm font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                  Düzəliş Səbəbi / Qeyd
+                </label>
+                <input
+                  type="text"
+                  value={quickAdjustNote}
+                  onChange={e => setQuickAdjustNote(e.target.value)}
+                  placeholder="məs: Sayım nəticəsi əl ilə düzəliş"
+                  className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                />
               </div>
 
               <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2">

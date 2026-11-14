@@ -111,15 +111,36 @@ export interface DebtRecord {
   updatedAt: string;
 }
 
+export type CustomerTransactionType =
+  | 'open'
+  | 'deposit'
+  | 'withdraw'
+  | 'product_out'
+  | 'charge'
+  | 'adjustment';
+
 export interface CustomerTransaction {
   id: string;
-  type: 'deposit' | 'charge'; // deposit = balansa pul qoyuldu (+), charge = balansdan su/məhsul çıxıldı (-)
+  customerId?: string;
+  customerName?: string;
+  type: CustomerTransactionType;
   amount: number;
-  date: string;
-  time: string;
+  balanceBefore?: number;
+  balanceAfter?: number;
+  paymentMethod?: 'naqd' | 'kart' | 'pos' | 'kocurme' | 'balans';
+  productId?: string;
+  productName?: string;
+  quantity?: number;
+  unitPrice?: number;
+  items?: SaleItem[];
+  adjustmentDirection?: 'increase' | 'decrease';
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm
   note?: string;
   saleId?: string;
   createdBy?: string;
+  idempotencyKey?: string;
+  createdAt?: string;
 }
 
 export interface CustomerAccount {
@@ -128,11 +149,41 @@ export interface CustomerAccount {
   phone?: string;
   balance: number; // Cari aktiv depozit balansı (müsbət məbləğ)
   totalDeposited: number; // İndiyə qədər ödədiyi ümumi depozit cəmi
-  totalSpent: number; // Balansından çıxılan ümumi xərc cəmi
+  totalSpent: number; // Balansından məhsul/xidmətə çıxılan cəm
+  totalWithdrawn?: number; // Balansdan sərbəst geri çəkilən pul cəmi
+  openedDate?: string; // Balansın ilk açıldığı tarix (YYYY-MM-DD)
   notes?: string;
   transactions: CustomerTransaction[];
   createdAt: string;
   updatedAt: string;
+  updatedBy?: string;
+}
+
+export type DepoMovementType =
+  | 'normal_sale_out'
+  | 'balance_product_out'
+  | 'purchase_in'
+  | 'manual_adjustment';
+
+export interface DepoMovement {
+  id: string;
+  movementType: DepoMovementType;
+  productId: string;
+  productName: string;
+  quantityDelta: number; // + anbara giriş, - anbardan çıxış
+  stockBefore?: number;
+  stockAfter?: number;
+  unitPrice?: number;
+  totalAmount?: number;
+  customerName?: string;
+  referenceId?: string;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm
+  sourceLabel?: string; // məs: 'Müştəri balansından çıxarış'
+  note?: string;
+  createdBy: string;
+  idempotencyKey?: string;
+  createdAt: string;
 }
 
 export interface DailyReport {

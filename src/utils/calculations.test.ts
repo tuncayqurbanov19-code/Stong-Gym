@@ -4,6 +4,7 @@ import {
   calculateProductStock,
   calculateAllProductStocks,
   getLowStockProducts,
+  buildDepoMovementsLedger,
 } from './stockCalculations';
 import {
   calculatePaymentBreakdown,
@@ -12,6 +13,8 @@ import {
   checkCustomerDebt,
   calculateDebtOverview,
   calculateFinancialMetricsForRange,
+  extractBalanceProductWithdrawals,
+  extractBalanceCashWithdrawals,
 } from './financialCalculations';
 import {
   normalizeBarcode,
@@ -22,7 +25,15 @@ import {
   lookupBarcodeInIndex,
   hasLongerBarcodePrefixInIndex,
 } from './barcodeUtils';
-import { Product, PurchaseIntake, Sale, DebtRecord, DailyReport } from '../types';
+import {
+  Product,
+  PurchaseIntake,
+  Sale,
+  DebtRecord,
+  DailyReport,
+  CustomerAccount,
+  DepoMovement,
+} from '../types';
 
 test('Active stock calculation: initial + purchased - sold', () => {
   const dummyProduct: Product = {
@@ -475,5 +486,194 @@ test('POS barcode scanner matching supports exact, whitespace/newline trim, lead
   assert.equal(hasLongerBarcodePrefixInIndex(idx, '10', 'p-3'), true);
   assert.equal(hasLongerBarcodePrefixInIndex(idx, '47600106', 'p-1'), false);
 });
+
+test('Customer balance integration: open/deposit excluded from sales, product_out included in sales & Depo stock, free cash withdraw deducts net cash balance', () => {
+  const waterProduct: Product = {
+    id: 'p-water',
+    name: '0.5L Su',
+    barcode: '47600101',
+    salePrice: 1.0,
+    buyPrice: 0.4,
+    category: 'Su',
+    initialStock: 6,
+    minStockAlert: 2,
+    createdAt: '2026-11-01',
+  };
+
+  // Scenario from prompt:
+  // Nov 5: 50 AZN opened
+  // Nov 6: 20 AZN deposited
+  // Nov 7: 10 AZN free cash withdrawn + 2 waters (2 AZN) withdrawn via product_out
+  // Nov 7: also 1 normal cash sale of 10 AZN
+  const customerAccounts: CustomerAccount[] = [
+    {
+      id: 'cust-ali',
+      name: 'Əli',
+      balance: 58, // 50 + 20 - 10 - 2
+      totalDeposited: 70,
+      totalSpent: 2,
+      totalWithdrawn: 10,
+      openedDate: '2026-11-05',
+      transactions: [
+        {
+          id: 'tx-1',
+          type: 'open',
+          amount: 50,
+          balanceBefore: 0,
+          balanceAfter: 50,
+          paymentMethod: 'naqd',
+          date: '2026-11-05',
+          time: '10:00',
+        },
+        {
+          id: 'tx-2',
+          type: 'deposit',
+          amount: 20,
+          balanceBefore: 50,
+          balanceAfter: 70,
+          paymentMethod: 'naqd',
+          date: '2026-11-06',
+          time: '11:00',
+        },
+        {
+          id: 'tx-3',
+          type: 'withdraw',
+          amount: 10,
+          balanceBefore: 70,
+          balanceAfter: 60,
+          paymentMethod: 'naqd',
+          date: '2026-11-07',
+          time: '14:00',
+          note: 'Sərbəst pul çıxarışı',
+          createdBy: 'admin',
+        },
+        {
+          id: 'tx-4',
+          type: 'product_out',
+          amount: 2,
+          balanceBefore: 60,
+          balanceAfter: 58,
+          paymentMethod: 'balans',
+          productId: 'p-water',
+          productName: '0.5L Su',
+          quantity: 2,
+          unitPrice: 1,
+          date: '2026-11-07',
+          time: '15:30',
+          createdBy: 'isci',
+        },
+      ],
+      createdAt: '2026-11-05T10:00:00Z',
+      updatedAt: '2026-11-07T15:30:00Z',
+    },
+  ];
+
+  const sales: Sale[] = [
+    {
+      id: 'sale-normal-1',
+      date: '2026-11-07',
+      time: '12:00',
+      items: [{ productId: 'p-shake', productName: 'Shake', quantity: 2, unitPrice: 5, totalPrice: 10 }],
+      totalAmount: 10,
+      paymentType: 'naqd',
+      isConfirmed: true,
+      createdAt: '2026-11-07T12:00:00Z',
+      createdBy: 'isci',
+    },
+    {
+      id: 'sale-bal-1',
+      date: '2026-11-07',
+      time: '15:30',
+      items: [{ productId: 'p-water', productName: '0.5L Su', quantity: 2, unitPrice: 1, totalPrice: 2 }],
+      totalAmount: 2,
+      paymentType: 'balans',
+      debtorName: 'Əli',
+      isConfirmed: true,
+      createdAt: '2026-11-07T15:30:00Z',
+      createdBy: 'isci',
+    },
+  ];
+
+  // Depo stock for 0.5L Su: initial 6 - 2 balance product_out = 4 left!
+  const waterStock = calculateProductStock(waterProduct, [], sales, 2);
+  assert.equal(waterStock.activeStock, 4);
+
+  // Nov 5 & Nov 6: balance opening & top-up MUST NOT count as sales revenue
+  const nov5Metrics = calculateFinancialMetricsForRange({
+    sales,
+    debts: [],
+    customerAccounts,
+    startDate: '2026-11-05',
+    endDate: '2026-11-05',
+  });
+  assert.equal(nov5Metrics.grossSalesTotal, 0);
+  assert.equal(nov5Metrics.balanceDepositsTotal, 50);
+
+  // Nov 7: Normal sales = 10, Balance product out = 2 -> Gross sales = 12; Free cash withdrawal = 10 -> Net Cash = 10 - 10 = 0
+  const nov7Metrics = calculateFinancialMetricsForRange({
+    sales,
+    debts: [],
+    customerAccounts,
+    startDate: '2026-11-07',
+    endDate: '2026-11-07',
+  });
+  assert.equal(nov7Metrics.normalSalesTotal, 10);
+  assert.equal(nov7Metrics.balanceSales, 2);
+  assert.equal(nov7Metrics.grossSalesTotal, 12);
+  assert.equal(nov7Metrics.balanceCashWithdrawals, 10);
+  assert.equal(nov7Metrics.actualDrawerInflow, 10);
+  assert.equal(nov7Metrics.totalCashOutflow, 10);
+  assert.equal(nov7Metrics.netCashBalance, 0);
+
+  const productOuts = extractBalanceProductWithdrawals(sales, '2026-11-07', '2026-11-07');
+  assert.equal(productOuts.length, 1);
+  assert.equal(productOuts[0].customerName, 'Əli');
+  assert.equal(productOuts[0].productName, '0.5L Su');
+  assert.equal(productOuts[0].quantity, 2);
+  assert.equal(productOuts[0].totalAmount, 2);
+
+  const cashOuts = extractBalanceCashWithdrawals(customerAccounts, '2026-11-07', '2026-11-07');
+  assert.equal(cashOuts.length, 1);
+  assert.equal(cashOuts[0].customerName, 'Əli');
+  assert.equal(cashOuts[0].amount, 10);
+
+  // Depo 4-category ledger separation
+  const purchases: PurchaseIntake[] = [
+    {
+      id: 'pur-water',
+      date: '2026-11-05',
+      productId: 'p-water',
+      productName: '0.5L Su',
+      quantity: 12,
+      paidAmount: 4.8,
+      createdAt: '2026-11-05T09:00:00Z',
+      createdBy: 'admin',
+    },
+  ];
+  const manualAdjustments: DepoMovement[] = [
+    {
+      id: 'dm-adj-1',
+      movementType: 'manual_adjustment',
+      productId: 'p-water',
+      productName: '0.5L Su',
+      quantityDelta: -1,
+      date: '2026-11-07',
+      time: '18:00',
+      sourceLabel: 'Əl ilə edilən depo düzəlişi',
+      createdBy: 'admin',
+      createdAt: '2026-11-07T18:00:00Z',
+    },
+  ];
+
+  const ledger = buildDepoMovementsLedger({ purchases, sales, manualAdjustments });
+  assert.equal(ledger.counts.normal_sale_out, 1);
+  assert.equal(ledger.counts.balance_product_out, 1);
+  assert.equal(ledger.counts.purchase_in, 1);
+  assert.equal(ledger.counts.manual_adjustment, 1);
+  const balanceMovement = ledger.movements.find(m => m.movementType === 'balance_product_out');
+  assert.equal(balanceMovement?.sourceLabel, 'Müştəri balansından çıxarış');
+  assert.equal(balanceMovement?.quantityDelta, -2);
+});
+
 
 

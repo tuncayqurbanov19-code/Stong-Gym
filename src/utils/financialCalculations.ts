@@ -1,4 +1,4 @@
-import { DailyReport, DebtRecord, Expense, Product, PurchaseIntake, Sale } from '../types';
+import { CustomerAccount, DailyReport, DebtRecord, Expense, Product, PurchaseIntake, Sale } from '../types';
 
 export interface PaymentBreakdown {
   cash: number;
@@ -104,13 +104,16 @@ export interface FinancialMetricsSummary {
   // Satışlar (Gəlir tərəfi)
   grossBeforeDiscount: number;  // Endirimdən əvvəlki ümumi satış dəyəri
   totalDiscounts: number;       // Dövrdə verilən endirimlərin cəmi
-  grossSalesTotal: number;      // Ümumi yekun satış məbləği (Nağd + Kart + POS + Balans + Borc)
+  grossSalesTotal: number;      // Ümumi yekun satış məbləği (Adi satışlar + Balansdan məhsul çıxarışları)
+  normalSalesTotal: number;     // Adi satışlar (Nağd + Kart + POS + Borc)
   salesCount: number;
+  normalSalesCount: number;
+  balanceProductOutCount: number;
   totalItemsSold: number;       // Satılan ümumi məhsul ədədi
   cashSales: number;            // Nağd satış məbləği
   cardSales: number;            // Kartla satış məbləği
   posSales: number;             // POS/Köçürmə satış məbləği
-  balanceSales: number;         // Müştəri depozit balansından satış (kassaya yeni pul girmir)
+  balanceSales: number;         // Müştəri balansından məhsul çıxarışı (satış dövriyyəsinə daxildir, kassaya yeni pul girmir)
   creditSales: number;          // Borcla satış məbləği (kassaya əlavə edilmir!)
   salesRealInflow: number;      // Satışdan faktiki kassaya girən (Nağd + Kart + POS)
 
@@ -121,6 +124,14 @@ export interface FinancialMetricsSummary {
   debtCollectedPos: number;
   debtCollectedCount: number;
 
+  // Müştəri Balansı Hərəkətləri (Depozit & Sərbəst Pul Çıxarışı — Satış deyil!)
+  balanceDepositsTotal: number;          // Açılan/artırılan depozit cəmi (satış gəliri deyil)
+  balanceCashWithdrawals: number;        // Balansdan sərbəst pul çıxarışı (satış gəliri deyil, kassadan pul çıxışı!)
+  balanceCashWithdrawalsCash: number;
+  balanceCashWithdrawalsCard: number;
+  balanceCashWithdrawalsPos: number;
+  balanceCashWithdrawalsCount: number;
+
   // Kassanın faktiki daxilolmaları (Metod üzrə)
   drawerCashInflow: number;     // cashSales + debtCollectedCash
   drawerCardInflow: number;     // cardSales + debtCollectedCard
@@ -130,7 +141,7 @@ export interface FinancialMetricsSummary {
   // Çıxan pullar və Xalis Kassa Balansı
   purchasesOutflow: number;     // Mal alışına gedən pul
   expensesOutflow: number;      // Digər xərclər
-  totalCashOutflow: number;     // Cəmi çıxan pul
+  totalCashOutflow: number;     // Cəmi çıxan pul (purchases + expenses + balanceCashWithdrawals)
   netCashBalance: number;       // Kassanın faktiki xalis balansı (actualDrawerInflow - totalCashOutflow)
 
   // Ümumi sistem üzrə ödənilməmiş borclar
@@ -140,16 +151,19 @@ export interface FinancialMetricsSummary {
 /**
  * Authoritative financial calculation shared across POS, Daily Report, and Dashboard.
  * Rules:
- * 1. Gross sales include all confirmed sales & credit ('borc') sales as revenue.
- * 2. Credit sales ('borc') NEVER enter actual cash drawer inflow when created.
- * 3. Debt collections enter actual cash drawer inflow on the exact `paidAt` date, separated cleanly as `debtCollectedTotal`.
- * 4. Net cash balance = actualDrawerInflow - (purchases + expenses).
+ * 1. Gross sales include all confirmed sales, balance product withdrawals ('balans'), & credit ('borc') sales as revenue.
+ * 2. Initial balance openings/top-ups ('open', 'deposit') and free cash withdrawals ('withdraw') are NEVER counted as sales revenue.
+ * 3. Free cash withdrawals from balance ('withdraw') subtract from Net Cash Balance (`totalCashOutflow` & `netCashBalance`) cleanly.
+ * 4. Credit sales ('borc') NEVER enter actual cash drawer inflow when created.
+ * 5. Debt collections enter actual cash drawer inflow on the exact `paidAt` date, separated cleanly as `debtCollectedTotal`.
+ * 6. Net cash balance = actualDrawerInflow - (purchases + expenses + balanceCashWithdrawals).
  */
 export function calculateFinancialMetricsForRange(params: {
   sales: Sale[];
   debts: DebtRecord[];
   purchases?: PurchaseIntake[];
   expenses?: Expense[];
+  customerAccounts?: CustomerAccount[];
   startDate: string;
   endDate: string;
   includeUnconfirmedSales?: boolean;
@@ -159,6 +173,7 @@ export function calculateFinancialMetricsForRange(params: {
     debts,
     purchases = [],
     expenses = [],
+    customerAccounts = [],
     startDate,
     endDate,
     includeUnconfirmedSales = false,
@@ -176,15 +191,23 @@ export function calculateFinancialMetricsForRange(params: {
 
   let totalDiscounts = 0;
   let totalItemsSold = 0;
+  let balanceProductOutCount = 0;
+  let normalSalesCount = 0;
+
   for (const s of filteredSales) {
     totalDiscounts += Number(s.discountAmount) || 0;
+    if (s.paymentType === 'balans') {
+      balanceProductOutCount += 1;
+    } else {
+      normalSalesCount += 1;
+    }
     for (const item of s.items || []) {
       totalItemsSold += Number(item.quantity) || 0;
     }
   }
   totalDiscounts = round2(totalDiscounts);
   const grossBeforeDiscount = round2(breakdown.total + totalDiscounts);
-
+  const normalSalesTotal = round2(breakdown.cash + breakdown.card + breakdown.pos + breakdown.debt);
   const salesRealInflow = round2(breakdown.cash + breakdown.card + breakdown.pos);
 
   let debtCollectedCash = 0;
@@ -208,6 +231,37 @@ export function calculateFinancialMetricsForRange(params: {
     }
   }
 
+  let balanceDepositsTotal = 0;
+  let balanceCashWithdrawalsCash = 0;
+  let balanceCashWithdrawalsCard = 0;
+  let balanceCashWithdrawalsPos = 0;
+  let balanceCashWithdrawalsCount = 0;
+
+  for (const cust of customerAccounts) {
+    for (const tx of cust.transactions || []) {
+      const txDate = (tx.date || '').split('T')[0];
+      if (!txDate || txDate < startDate || txDate > endDate) continue;
+
+      const amt = Number(tx.amount) || 0;
+      if (amt <= 0) continue;
+
+      if (tx.type === 'open' || tx.type === 'deposit') {
+        balanceDepositsTotal += amt;
+      } else if (tx.type === 'withdraw') {
+        balanceCashWithdrawalsCount += 1;
+        const m = (tx.paymentMethod || 'naqd').toLowerCase();
+        if (m === 'kart') balanceCashWithdrawalsCard += amt;
+        else if (m === 'pos' || m === 'kocurme') balanceCashWithdrawalsPos += amt;
+        else balanceCashWithdrawalsCash += amt;
+      }
+    }
+  }
+
+  const balanceCashWithdrawals = round2(
+    balanceCashWithdrawalsCash + balanceCashWithdrawalsCard + balanceCashWithdrawalsPos
+  );
+  balanceDepositsTotal = round2(balanceDepositsTotal);
+
   const debtCollectedTotal = round2(debtCollectedCash + debtCollectedCard + debtCollectedPos);
   const drawerCashInflow = round2(breakdown.cash + debtCollectedCash);
   const drawerCardInflow = round2(breakdown.card + debtCollectedCard);
@@ -224,7 +278,7 @@ export function calculateFinancialMetricsForRange(params: {
       .filter(e => e.date >= startDate && e.date <= endDate)
       .reduce((sum, e) => sum + (Number(e.amount) || 0), 0)
   );
-  const totalCashOutflow = round2(purchasesOutflow + expensesOutflow);
+  const totalCashOutflow = round2(purchasesOutflow + expensesOutflow + balanceCashWithdrawals);
   const netCashBalance = round2(actualDrawerInflow - totalCashOutflow);
 
   const totalUnpaidDebts = round2(
@@ -239,7 +293,10 @@ export function calculateFinancialMetricsForRange(params: {
     grossBeforeDiscount,
     totalDiscounts,
     grossSalesTotal: round2(breakdown.total),
+    normalSalesTotal,
     salesCount: filteredSales.length,
+    normalSalesCount,
+    balanceProductOutCount,
     totalItemsSold,
     cashSales: round2(breakdown.cash),
     cardSales: round2(breakdown.card),
@@ -252,6 +309,12 @@ export function calculateFinancialMetricsForRange(params: {
     debtCollectedCard: round2(debtCollectedCard),
     debtCollectedPos: round2(debtCollectedPos),
     debtCollectedCount,
+    balanceDepositsTotal,
+    balanceCashWithdrawals,
+    balanceCashWithdrawalsCash: round2(balanceCashWithdrawalsCash),
+    balanceCashWithdrawalsCard: round2(balanceCashWithdrawalsCard),
+    balanceCashWithdrawalsPos: round2(balanceCashWithdrawalsPos),
+    balanceCashWithdrawalsCount,
     drawerCashInflow,
     drawerCardInflow,
     drawerPosInflow,
@@ -262,6 +325,104 @@ export function calculateFinancialMetricsForRange(params: {
     netCashBalance,
     totalUnpaidDebts,
   };
+}
+
+export interface BalanceProductWithdrawalItem {
+  id: string;
+  saleId: string;
+  customerName: string;
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  date: string;
+  time: string;
+  createdBy: string;
+}
+
+export interface BalanceCashWithdrawalItem {
+  id: string;
+  customerId: string;
+  customerName: string;
+  amount: number;
+  paymentMethod: string;
+  date: string;
+  time: string;
+  note?: string;
+  createdBy: string;
+}
+
+/**
+ * Extracts itemized product withdrawals from customer balance for Daily Sales Report
+ */
+export function extractBalanceProductWithdrawals(
+  sales: Sale[],
+  startDate: string,
+  endDate: string
+): BalanceProductWithdrawalItem[] {
+  const result: BalanceProductWithdrawalItem[] = [];
+  for (const s of sales) {
+    if (s.paymentType !== 'balans') continue;
+    if (!s.isConfirmed) continue;
+    if (s.date < startDate || s.date > endDate) continue;
+
+    (s.items || []).forEach((item, idx) => {
+      result.push({
+        id: `${s.id}-item-${idx}`,
+        saleId: s.id,
+        customerName: s.debtorName || 'Müştəri',
+        productId: item.productId,
+        productName: item.productName,
+        quantity: Number(item.quantity) || 0,
+        unitPrice: Number(item.unitPrice) || 0,
+        totalAmount: Number(item.totalPrice) || 0,
+        date: s.date,
+        time: s.time || '00:00',
+        createdBy: s.createdBy || 'isci',
+      });
+    });
+  }
+  return result.sort((a, b) => {
+    const dCmp = b.date.localeCompare(a.date);
+    if (dCmp !== 0) return dCmp;
+    return b.time.localeCompare(a.time);
+  });
+}
+
+/**
+ * Extracts itemized free cash withdrawals from customer balance (NOT sales revenue)
+ */
+export function extractBalanceCashWithdrawals(
+  customerAccounts: CustomerAccount[],
+  startDate: string,
+  endDate: string
+): BalanceCashWithdrawalItem[] {
+  const result: BalanceCashWithdrawalItem[] = [];
+  for (const cust of customerAccounts) {
+    for (const tx of cust.transactions || []) {
+      if (tx.type !== 'withdraw') continue;
+      const txDate = (tx.date || '').split('T')[0];
+      if (!txDate || txDate < startDate || txDate > endDate) continue;
+
+      result.push({
+        id: tx.id,
+        customerId: cust.id,
+        customerName: cust.name,
+        amount: Number(tx.amount) || 0,
+        paymentMethod: (tx.paymentMethod || 'naqd').toLowerCase(),
+        date: txDate,
+        time: tx.time || '00:00',
+        note: tx.note,
+        createdBy: tx.createdBy || 'admin',
+      });
+    }
+  }
+  return result.sort((a, b) => {
+    const dCmp = b.date.localeCompare(a.date);
+    if (dCmp !== 0) return dCmp;
+    return b.time.localeCompare(a.time);
+  });
 }
 
 

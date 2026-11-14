@@ -7,12 +7,14 @@ import {
   DebtRecord,
   CustomerAccount,
   CustomerTransaction,
+  DepoMovement,
   DailyReport,
   Expense,
   AppSettings,
   AuditLog,
   DebtPayment,
   DebtPaymentMethod,
+  SaleItem,
 } from '../types';
 import { getTodayISODate, getCurrentTimeHHMM } from '../utils/dateUtils';
 import { calculateProductStock } from '../utils/stockCalculations';
@@ -47,6 +49,11 @@ import {
   mapAuditLogToDB,
   mapDBToCustomerAccount,
   mapCustomerAccountToDB,
+  mapCustomerAccountToLegacyDB,
+  mapDBToCustomerBalanceTx,
+  mapCustomerBalanceTxToDB,
+  mapDBToDepoMovement,
+  mapDepoMovementToDB,
   applyAppSettingsRows,
   serializeSettingsToKV,
 } from '../lib/supabase';
@@ -90,6 +97,60 @@ export interface AcceptDebtPaymentParams {
   note?: string;
 }
 
+export interface OpenOrDepositBalanceParams {
+  customerId?: string;
+  customerName: string;
+  phone?: string;
+  amount: number;
+  paymentMethod?: 'naqd' | 'kart' | 'pos';
+  date?: string;
+  time?: string;
+  note?: string;
+  idempotencyKey?: string;
+}
+
+export interface WithdrawCustomerCashParams {
+  customerId: string;
+  amount: number;
+  paymentMethod?: 'naqd' | 'kart' | 'pos';
+  date?: string;
+  time?: string;
+  note?: string;
+  idempotencyKey?: string;
+}
+
+export interface WithdrawProductFromBalanceParams {
+  customerId: string;
+  productId: string;
+  quantity: number;
+  date?: string;
+  time?: string;
+  note?: string;
+  idempotencyKey?: string;
+}
+
+export interface AdjustCustomerBalanceParams {
+  customerId: string;
+  name?: string;
+  phone?: string;
+  notes?: string;
+  newBalance?: number;
+  reason?: string;
+  date?: string;
+  time?: string;
+}
+
+export interface RecordDepoAdjustmentParams {
+  productId: string;
+  targetActiveStock: number;
+  barcode?: string;
+  salePrice?: number;
+  buyPrice?: number;
+  note?: string;
+  date?: string;
+  time?: string;
+}
+
 interface AppContextType {
   currentUser: User | null;
   login: (username: string, password: string) => { success: boolean; error?: string };
@@ -105,6 +166,8 @@ interface AppContextType {
   purchases: PurchaseIntake[];
   addPurchase: (purchase: Omit<PurchaseIntake, 'id' | 'createdAt' | 'createdBy'>) => void;
   deletePurchase: (id: string) => void;
+  depoMovements: DepoMovement[];
+  recordManualDepoAdjustment: (params: RecordDepoAdjustmentParams) => Promise<{ success: boolean; error?: string }>;
   sales: Sale[];
   addSale: (saleData: {
     items: { productId: string; quantity: number }[];
@@ -136,11 +199,26 @@ interface AppContextType {
     paymentType?: 'naqd' | 'kart' | 'pos',
     note?: string
   ) => void;
+  openOrDepositCustomerBalance: (
+    params: OpenOrDepositBalanceParams
+  ) => Promise<{ success: boolean; error?: string; customerId?: string }>;
+  withdrawCustomerCash: (
+    params: WithdrawCustomerCashParams
+  ) => Promise<{ success: boolean; error?: string }>;
+  withdrawProductFromBalance: (
+    params: WithdrawProductFromBalanceParams
+  ) => Promise<{ success: boolean; error?: string; saleId?: string }>;
+  adjustCustomerBalance: (
+    params: AdjustCustomerBalanceParams
+  ) => Promise<{ success: boolean; error?: string }>;
   chargeCustomerBalance: (
     customerName: string,
     amount: number,
     note?: string,
-    saleId?: string
+    saleId?: string,
+    date?: string,
+    time?: string,
+    items?: SaleItem[]
   ) => boolean;
   deleteCustomerAccount: (customerId: string) => void;
   dailyReports: DailyReport[];
@@ -224,6 +302,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [users, setUsers] = useState<User[]>(() => loadFromStorage('users', INITIAL_USERS));
   const [products, setProducts] = useState<Product[]>(() => loadFromStorage('products', INITIAL_PRODUCTS));
   const [purchases, setPurchases] = useState<PurchaseIntake[]>(() => loadFromStorage('purchases', INITIAL_PURCHASES));
+  const [depoMovements, setDepoMovements] = useState<DepoMovement[]>(() => loadFromStorage('depoMovements', []));
   const [sales, setSales] = useState<Sale[]>(() => loadFromStorage('sales', INITIAL_SALES));
   const [debts, setDebts] = useState<DebtRecord[]>(() => loadFromStorage('debts', INITIAL_DEBTS));
   const [customerAccounts, setCustomerAccounts] = useState<CustomerAccount[]>(() =>
@@ -293,6 +372,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         settingsRes,
         logsRes,
         customersRes,
+        balanceTxRes,
+        depoMovementsRes,
       ] = await Promise.all([
         supabase.from('products').select('*'),
         supabase.from('users').select('*'),
@@ -305,12 +386,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         supabase.from('app_settings').select('*'),
         supabase.from('audit_logs').select('*').order('timestamp', { ascending: false }).limit(100),
         supabase.from('customer_accounts').select('*').order('name'),
+        supabase.from('customer_balance_transactions').select('*').order('created_at', { ascending: false }),
+        supabase.from('depo_movements').select('*').order('created_at', { ascending: false }),
       ]);
 
       if (prodsRes.data && prodsRes.data.length > 0) setProducts(prodsRes.data.map(mapDBToProduct));
       if (usersRes.data && usersRes.data.length > 0) setUsers(usersRes.data.map(mapDBToUser));
       if (salesRes.data) setSales(salesRes.data.map(mapDBToSale));
       if (purchasesRes.data) setPurchases(purchasesRes.data.map(mapDBToPurchase));
+      if (!depoMovementsRes.error && depoMovementsRes.data) {
+        setDepoMovements(depoMovementsRes.data.map(mapDBToDepoMovement));
+      }
 
       if (debtsRes.data) {
         const mappedDebts = debtsRes.data.map(mapDBToDebt);
@@ -336,7 +422,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
 
       if (customersRes.data && customersRes.data.length > 0) {
-        setCustomerAccounts(customersRes.data.map(mapDBToCustomerAccount));
+        const mappedCustomers = customersRes.data.map(mapDBToCustomerAccount);
+        if (!balanceTxRes.error && balanceTxRes.data && balanceTxRes.data.length > 0) {
+          const txByCust: Record<string, CustomerTransaction[]> = {};
+          for (const row of balanceTxRes.data) {
+            const tx = mapDBToCustomerBalanceTx(row);
+            const cid = tx.customerId || '';
+            if (!cid) continue;
+            if (!txByCust[cid]) txByCust[cid] = [];
+            txByCust[cid].push(tx);
+          }
+          setCustomerAccounts(
+            mappedCustomers.map(c => {
+              const normalizedTx = txByCust[c.id];
+              if (normalizedTx && normalizedTx.length > 0) {
+                return { ...c, transactions: normalizedTx };
+              }
+              return c;
+            })
+          );
+        } else {
+          setCustomerAccounts(mappedCustomers);
+        }
       }
       if (reportsRes.data) setDailyReports(reportsRes.data.map(mapDBToDailyReport));
       if (expensesRes.data) setExpenses(expensesRes.data.map(mapDBToExpense));
@@ -560,6 +667,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setCustomerAccounts((prev) => prev.filter((c) => c.id !== payload.old.id));
         }
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'depo_movements' }, (payload) => {
+        if (!isMounted) return;
+        if (payload.eventType === 'INSERT') {
+          const newDm = mapDBToDepoMovement(payload.new);
+          setDepoMovements((prev) => {
+            if (prev.some((m) => m.id === newDm.id)) return prev;
+            return [newDm, ...prev];
+          });
+        } else if (payload.eventType === 'DELETE') {
+          setDepoMovements((prev) => prev.filter((m) => m.id !== payload.old.id));
+        }
+      })
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           setIsSupabaseConnected(true);
@@ -623,7 +742,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
       if (customerAccounts.length > 0) {
-        await supabase.from('customer_accounts').upsert(customerAccounts.map(mapCustomerAccountToDB));
+        const custRes = await supabase.from('customer_accounts').upsert(customerAccounts.map(mapCustomerAccountToDB));
+        if (custRes.error && /column/i.test(custRes.error.message || '')) {
+          await supabase.from('customer_accounts').upsert(customerAccounts.map(mapCustomerAccountToLegacyDB));
+        }
+        const allBalanceTxs = customerAccounts.flatMap(c =>
+          (c.transactions || []).map(tx => mapCustomerBalanceTxToDB(tx, c.id, c.name))
+        );
+        if (allBalanceTxs.length > 0) {
+          await supabase.from('customer_balance_transactions').upsert(allBalanceTxs);
+        }
+      }
+      if (depoMovements.length > 0) {
+        await supabase.from('depo_movements').upsert(depoMovements.map(mapDepoMovementToDB));
       }
       if (dailyReports.length > 0) {
         await supabase.from('daily_reports').upsert(dailyReports.map(mapDailyReportToDB));
@@ -680,6 +811,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     saveToDualStorage('purchases', purchases);
   }, [purchases]);
+
+  useEffect(() => {
+    saveToDualStorage('depoMovements', depoMovements);
+  }, [depoMovements]);
 
   useEffect(() => {
     saveToDualStorage('sales', sales);
@@ -867,8 +1002,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       showToast('error', 'İcazə yoxdur: Yalnız Admin məhsul məlumatlarını redaktə edə bilər!');
       return;
     }
+    const prevProduct = products.find(p => p.id === id);
     setProducts(prev => prev.map(p => (p.id === id ? { ...p, ...updates } : p)));
     addAuditLog('Məhsul redaktə edildi', `Məhsul ID: ${id} yeniləndi.`);
+
+    // If initialStock changed via full edit modal, record a transparent manual_adjustment movement
+    if (
+      prevProduct &&
+      updates.initialStock !== undefined &&
+      Number(updates.initialStock) !== Number(prevProduct.initialStock)
+    ) {
+      const oldStock = calculateProductStock(prevProduct, purchases, sales, settings.minStockThreshold).activeStock;
+      const newStock = calculateProductStock(
+        { ...prevProduct, ...updates },
+        purchases,
+        sales,
+        settings.minStockThreshold
+      ).activeStock;
+      const delta = newStock - oldStock;
+      if (delta !== 0) {
+        const adjMovement: DepoMovement = {
+          id: `dm-adj-${Date.now()}`,
+          movementType: 'manual_adjustment',
+          productId: prevProduct.id,
+          productName: updates.name ?? prevProduct.name,
+          quantityDelta: delta,
+          stockBefore: oldStock,
+          stockAfter: newStock,
+          date: getTodayISODate(),
+          time: getCurrentTimeHHMM(),
+          sourceLabel: 'Əl ilə edilən depo düzəlişi',
+          note: `Məhsul redaktəsindən qalıq düzəlişi (${oldStock} -> ${newStock})`,
+          createdBy: currentUser?.username || 'admin',
+          createdAt: new Date().toISOString(),
+        };
+        setDepoMovements(prev => [adjMovement, ...prev]);
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          safeDbExec(supabase.from('depo_movements').insert(mapDepoMovementToDB(adjMovement)));
+        }
+      }
+    }
 
     const supabase = getSupabaseClient();
     if (supabase) {
@@ -886,6 +1060,115 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       safeDbExec(supabase.from('products').update(dbUpdates).eq('id', id));
     }
+  };
+
+  const recordManualDepoAdjustment = async (
+    params: RecordDepoAdjustmentParams
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (currentUser?.role !== 'admin') {
+      return { success: false, error: 'İcazə yoxdur: Yalnız Admin depo qalığını düzəldə bilər!' };
+    }
+    const targetProd = products.find(p => p.id === params.productId);
+    if (!targetProd) {
+      return { success: false, error: 'Məhsul tapılmadı!' };
+    }
+
+    const stock = calculateProductStock(targetProd, purchases, sales, settings.minStockThreshold);
+    const parsedTarget = Math.max(0, Math.trunc(Number(params.targetActiveStock) || 0));
+    const newInitialStock = Math.max(0, parsedTarget - stock.totalPurchased + stock.totalSold);
+    const delta = parsedTarget - stock.activeStock;
+    const date = (params.date || getTodayISODate()).split('T')[0];
+    const time = params.time || getCurrentTimeHHMM();
+    const actor = currentUser?.username || 'admin';
+    const nowIso = new Date().toISOString();
+
+    const updatedProd: Product = {
+      ...targetProd,
+      initialStock: newInitialStock,
+      barcode: params.barcode?.trim() || targetProd.barcode,
+      salePrice:
+        params.salePrice !== undefined && Number.isFinite(params.salePrice) && params.salePrice >= 0
+          ? params.salePrice
+          : targetProd.salePrice,
+      buyPrice:
+        params.buyPrice !== undefined && Number.isFinite(params.buyPrice) && params.buyPrice >= 0
+          ? params.buyPrice
+          : targetProd.buyPrice,
+    };
+
+    setProducts(prev => prev.map(p => (p.id === targetProd.id ? updatedProd : p)));
+
+    let adjMovement: DepoMovement | null = null;
+    if (delta !== 0) {
+      adjMovement = {
+        id: `dm-adj-${Date.now()}`,
+        movementType: 'manual_adjustment',
+        productId: targetProd.id,
+        productName: updatedProd.name,
+        quantityDelta: delta,
+        stockBefore: stock.activeStock,
+        stockAfter: parsedTarget,
+        date,
+        time,
+        sourceLabel: 'Əl ilə edilən depo düzəlişi',
+        note:
+          params.note?.trim() ||
+          `Əl ilə qalıq düzəlişi (${stock.activeStock} -> ${parsedTarget})`,
+        createdBy: actor,
+        createdAt: nowIso,
+      };
+      setDepoMovements(prev => [adjMovement!, ...prev]);
+    }
+
+    addAuditLog(
+      'Depo Qalığı Düzəldildi',
+      `${updatedProd.name}: ${stock.activeStock} -> ${parsedTarget} ədəd (${delta >= 0 ? `+${delta}` : delta})`
+    );
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const rpcRes = await supabase.rpc('record_manual_depo_adjustment', {
+          p_product_id: targetProd.id,
+          p_target_active_stock: parsedTarget,
+          p_date: date,
+          p_time: time,
+          p_note: adjMovement?.note || null,
+          p_actor_username: actor,
+        });
+        if (rpcRes.error) {
+          await supabase
+            .from('products')
+            .update({
+              initial_stock: newInitialStock,
+              barcode: updatedProd.barcode,
+              sale_price: updatedProd.salePrice,
+              buy_price: updatedProd.buyPrice,
+            })
+            .eq('id', targetProd.id);
+          if (adjMovement) {
+            await supabase.from('depo_movements').insert(mapDepoMovementToDB(adjMovement));
+          }
+        } else if (
+          updatedProd.barcode !== targetProd.barcode ||
+          updatedProd.salePrice !== targetProd.salePrice ||
+          updatedProd.buyPrice !== targetProd.buyPrice
+        ) {
+          await supabase
+            .from('products')
+            .update({
+              barcode: updatedProd.barcode,
+              sale_price: updatedProd.salePrice,
+              buy_price: updatedProd.buyPrice,
+            })
+            .eq('id', targetProd.id);
+        }
+      } catch (err) {
+        console.warn('recordManualDepoAdjustment supabase sync warning:', err);
+      }
+    }
+
+    return { success: true };
   };
 
   const deleteProduct = (id: string) => {
@@ -1087,70 +1370,589 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     syncDailyReportsForDates([date], combinedSales, overrideDebts);
   };
 
+  const lastBalanceOpGuardRef = React.useRef<{ sig: string; ts: number }>({ sig: '', ts: 0 });
+  const usedIdempotencyKeysRef = React.useRef<Set<string>>(new Set());
+
+  const upsertCustomerAccountSafe = (acc: CustomerAccount, isUpdate = false) => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    const run = async () => {
+      const payload = mapCustomerAccountToDB(acc);
+      const res = isUpdate
+        ? await supabase.from('customer_accounts').upsert(payload)
+        : await supabase.from('customer_accounts').insert(payload);
+      if (res.error && /column/i.test(res.error.message || '')) {
+        const legacy = mapCustomerAccountToLegacyDB(acc);
+        if (isUpdate) {
+          await supabase.from('customer_accounts').upsert(legacy);
+        } else {
+          await supabase.from('customer_accounts').insert(legacy);
+        }
+      }
+    };
+    safeDbExec(run());
+  };
+
+  const openOrDepositCustomerBalance = async (
+    params: OpenOrDepositBalanceParams
+  ): Promise<{ success: boolean; error?: string; customerId?: string }> => {
+    const cleanName = (params.customerName || '').trim();
+    const round2 = (v: number) => Math.round(v * 100) / 100;
+    const cleanAmount = round2(Number(params.amount) || 0);
+    const method = params.paymentMethod || 'naqd';
+    const date = (params.date || getTodayISODate()).split('T')[0];
+    const time = params.time || getCurrentTimeHHMM();
+    const actor = currentUser?.username || 'admin';
+    const nowIso = new Date().toISOString();
+    const idemKey = params.idempotencyKey?.trim();
+
+    if (idemKey && usedIdempotencyKeysRef.current.has(idemKey)) {
+      return { success: false, error: 'Bu əməliyyat artıq icra olunub.' };
+    }
+
+    const existing = params.customerId
+      ? customerAccounts.find(c => c.id === params.customerId)
+      : customerAccounts.find(c => c.name.trim().toLowerCase() === cleanName.toLowerCase());
+
+    if (!existing && !cleanName) {
+      return { success: false, error: 'Yeni balans açmaq üçün müştəri adı daxil edin!' };
+    }
+    if (existing && cleanAmount <= 0) {
+      return { success: false, error: 'Əlavə edilən məbləğ 0-dan böyük olmalıdır!' };
+    }
+    if (!existing && cleanAmount < 0) {
+      return { success: false, error: 'İlkin balans mənfi ola bilməz!' };
+    }
+
+    const opSig = `deposit:${existing?.id || cleanName.toLowerCase()}:${cleanAmount}:${date}:${time}`;
+    const nowTs = Date.now();
+    if (lastBalanceOpGuardRef.current.sig === opSig && nowTs - lastBalanceOpGuardRef.current.ts < 800) {
+      return { success: false, error: 'Əməliyyat artıq icra olunur.' };
+    }
+    lastBalanceOpGuardRef.current = { sig: opSig, ts: nowTs };
+    if (idemKey) usedIdempotencyKeysRef.current.add(idemKey);
+
+    const txId = `ctx-${nowTs}`;
+    const targetCustomerId = existing?.id || `cust-${nowTs}`;
+
+    let updatedAcc: CustomerAccount;
+    let tx: CustomerTransaction;
+
+    if (existing) {
+      const balBefore = round2(existing.balance);
+      const balAfter = round2(balBefore + cleanAmount);
+      tx = {
+        id: txId,
+        customerId: existing.id,
+        customerName: existing.name,
+        type: 'deposit',
+        amount: cleanAmount,
+        balanceBefore: balBefore,
+        balanceAfter: balAfter,
+        paymentMethod: method,
+        date,
+        time,
+        note: params.note?.trim() || `Balans artırıldı (${method.toUpperCase()})`,
+        createdBy: actor,
+        idempotencyKey: idemKey,
+        createdAt: nowIso,
+      };
+      updatedAcc = {
+        ...existing,
+        phone: params.phone?.trim() || existing.phone,
+        balance: balAfter,
+        totalDeposited: round2(existing.totalDeposited + cleanAmount),
+        openedDate: existing.openedDate || existing.transactions?.[existing.transactions.length - 1]?.date || existing.createdAt.slice(0, 10),
+        updatedAt: nowIso,
+        updatedBy: actor,
+        transactions: [tx, ...(existing.transactions || [])],
+      };
+      setCustomerAccounts(prev => prev.map(c => (c.id === existing.id ? updatedAcc : c)));
+      addAuditLog('Müştəri Balansı Artırıldı', `${existing.name}: +${cleanAmount.toFixed(2)} AZN (${method.toUpperCase()}) · Tarix: ${date} ${time}`);
+    } else {
+      tx = {
+        id: txId,
+        customerId: targetCustomerId,
+        customerName: cleanName,
+        type: 'open',
+        amount: cleanAmount,
+        balanceBefore: 0,
+        balanceAfter: cleanAmount,
+        paymentMethod: method,
+        date,
+        time,
+        note: params.note?.trim() || `Balans açıldı (${method.toUpperCase()})`,
+        createdBy: actor,
+        idempotencyKey: idemKey,
+        createdAt: nowIso,
+      };
+      updatedAcc = {
+        id: targetCustomerId,
+        name: cleanName,
+        phone: params.phone?.trim() || undefined,
+        balance: cleanAmount,
+        totalDeposited: cleanAmount,
+        totalSpent: 0,
+        totalWithdrawn: 0,
+        openedDate: date,
+        notes: params.note?.trim() || undefined,
+        transactions: [tx],
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        updatedBy: actor,
+      };
+      setCustomerAccounts(prev => [...prev, updatedAcc]);
+      addAuditLog('Yeni Müştəri Balansı Açıldı', `${cleanName}: ${cleanAmount.toFixed(2)} AZN (${method.toUpperCase()}) · Tarix: ${date} ${time}`);
+    }
+
+    playAlertSound('success');
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const rpcRes = await supabase.rpc('open_or_deposit_customer_balance', {
+          p_customer_id: targetCustomerId,
+          p_customer_name: updatedAcc.name,
+          p_phone: updatedAcc.phone || null,
+          p_amount: cleanAmount,
+          p_payment_method: method,
+          p_date: date,
+          p_time: time,
+          p_note: tx.note || null,
+          p_actor_username: actor,
+          p_idempotency_key: idemKey || null,
+        });
+        if (rpcRes.error) {
+          upsertCustomerAccountSafe(updatedAcc, Boolean(existing));
+          safeDbExec(supabase.from('customer_balance_transactions').insert(mapCustomerBalanceTxToDB(tx, updatedAcc.id, updatedAcc.name)));
+        }
+      } catch (err) {
+        console.warn('openOrDepositCustomerBalance supabase warning:', err);
+        upsertCustomerAccountSafe(updatedAcc, Boolean(existing));
+      }
+    }
+
+    return { success: true, customerId: updatedAcc.id };
+  };
+
   const depositToCustomer = (
     customerName: string,
     amount: number,
     paymentType: 'naqd' | 'kart' | 'pos' = 'naqd',
     note?: string
   ) => {
-    const cleanName = customerName.trim();
-    if (!cleanName || amount <= 0) return;
-
-    const tx: CustomerTransaction = {
-      id: `ctx-${Date.now()}`,
-      type: 'deposit',
+    void openOrDepositCustomerBalance({
+      customerName,
       amount,
-      date: getTodayISODate(),
-      time: getCurrentTimeHHMM(),
-      note: note || `Balans artırılması (${paymentType.toUpperCase()})`,
-      createdBy: currentUser?.username || 'admin',
+      paymentMethod: paymentType,
+      note,
+    });
+  };
+
+  const withdrawCustomerCash = async (
+    params: WithdrawCustomerCashParams
+  ): Promise<{ success: boolean; error?: string }> => {
+    const round2 = (v: number) => Math.round(v * 100) / 100;
+    const cleanAmount = round2(Number(params.amount) || 0);
+    const method = params.paymentMethod || 'naqd';
+    const date = (params.date || getTodayISODate()).split('T')[0];
+    const time = params.time || getCurrentTimeHHMM();
+    const actor = currentUser?.username || 'admin';
+    const nowIso = new Date().toISOString();
+    const idemKey = params.idempotencyKey?.trim();
+
+    if (idemKey && usedIdempotencyKeysRef.current.has(idemKey)) {
+      return { success: false, error: 'Bu əməliyyat artıq icra olunub.' };
+    }
+
+    const existing = customerAccounts.find(c => c.id === params.customerId);
+    if (!existing) {
+      return { success: false, error: 'Müştəri hesabı tapılmadı!' };
+    }
+    if (cleanAmount <= 0) {
+      return { success: false, error: 'Çıxarılan pul məbləği 0-dan böyük olmalıdır!' };
+    }
+    if (existing.balance + 0.001 < cleanAmount) {
+      return {
+        success: false,
+        error: `Balansda kifayət qədər vəsait yoxdur! Cari balans: ${existing.balance.toFixed(2)} AZN, Tələb: ${cleanAmount.toFixed(2)} AZN`,
+      };
+    }
+
+    const opSig = `withdraw:${existing.id}:${cleanAmount}:${date}:${time}`;
+    const nowTs = Date.now();
+    if (lastBalanceOpGuardRef.current.sig === opSig && nowTs - lastBalanceOpGuardRef.current.ts < 800) {
+      return { success: false, error: 'Əməliyyat artıq icra olunur.' };
+    }
+    lastBalanceOpGuardRef.current = { sig: opSig, ts: nowTs };
+    if (idemKey) usedIdempotencyKeysRef.current.add(idemKey);
+
+    const balBefore = round2(existing.balance);
+    const balAfter = Math.max(0, round2(balBefore - cleanAmount));
+    const tx: CustomerTransaction = {
+      id: `ctx-${nowTs}`,
+      customerId: existing.id,
+      customerName: existing.name,
+      type: 'withdraw',
+      amount: cleanAmount,
+      balanceBefore: balBefore,
+      balanceAfter: balAfter,
+      paymentMethod: method,
+      date,
+      time,
+      note: params.note?.trim() || `Balansdan sərbəst pul çıxarışı (${method.toUpperCase()})`,
+      createdBy: actor,
+      idempotencyKey: idemKey,
+      createdAt: nowIso,
     };
 
-    setCustomerAccounts(prev => {
-      const existing = prev.find(c => c.name.toLowerCase() === cleanName.toLowerCase());
-      let updated: CustomerAccount[];
-      if (existing) {
-        const newAcc: CustomerAccount = {
-          ...existing,
-          balance: Math.round((existing.balance + amount) * 100) / 100,
-          totalDeposited: Math.round((existing.totalDeposited + amount) * 100) / 100,
-          updatedAt: new Date().toISOString(),
-          transactions: [tx, ...(existing.transactions || [])],
-        };
-        updated = prev.map(c => (c.id === existing.id ? newAcc : c));
-        const supabase = getSupabaseClient();
-        if (supabase) {
-          safeDbExec(supabase.from('customer_accounts').upsert(mapCustomerAccountToDB(newAcc)));
+    const updatedAcc: CustomerAccount = {
+      ...existing,
+      balance: balAfter,
+      totalWithdrawn: round2((existing.totalWithdrawn || 0) + cleanAmount),
+      updatedAt: nowIso,
+      updatedBy: actor,
+      transactions: [tx, ...(existing.transactions || [])],
+    };
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const rpcRes = await supabase.rpc('withdraw_customer_cash', {
+          p_customer_id: existing.id,
+          p_amount: cleanAmount,
+          p_payment_method: method,
+          p_date: date,
+          p_time: time,
+          p_note: tx.note || null,
+          p_actor_username: actor,
+          p_idempotency_key: idemKey || null,
+        });
+        if (rpcRes.error && !/function|does not exist|schema cache/i.test(rpcRes.error.message || '')) {
+          return { success: false, error: rpcRes.error.message };
         }
-      } else {
-        const newAcc: CustomerAccount = {
-          id: `cust-${Date.now()}`,
-          name: cleanName,
-          balance: amount,
-          totalDeposited: amount,
-          totalSpent: 0,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          transactions: [tx],
-        };
-        updated = [...prev, newAcc];
-        const supabase = getSupabaseClient();
-        if (supabase) {
-          safeDbExec(supabase.from('customer_accounts').insert(mapCustomerAccountToDB(newAcc)));
+        if (rpcRes.error) {
+          upsertCustomerAccountSafe(updatedAcc, true);
+          safeDbExec(supabase.from('customer_balance_transactions').insert(mapCustomerBalanceTxToDB(tx, existing.id, existing.name)));
         }
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Pul çıxarışı zamanı xəta baş verdi.' };
       }
-      return updated;
-    });
+    }
+
+    setCustomerAccounts(prev => prev.map(c => (c.id === existing.id ? updatedAcc : c)));
+    playAlertSound('success');
+    addAuditLog(
+      'Balansdan Sərbəst Pul Çıxarıldı',
+      `${existing.name}: -${cleanAmount.toFixed(2)} AZN (${method.toUpperCase()}) · Tarix: ${date} ${time} · Qalıq: ${balAfter.toFixed(2)} AZN`
+    );
+
+    return { success: true };
+  };
+
+  const withdrawProductFromBalance = async (
+    params: WithdrawProductFromBalanceParams
+  ): Promise<{ success: boolean; error?: string; saleId?: string }> => {
+    const round2 = (v: number) => Math.round(v * 100) / 100;
+    const qty = Math.floor(Number(params.quantity) || 0);
+    const date = (params.date || getTodayISODate()).split('T')[0];
+    const time = params.time || getCurrentTimeHHMM();
+    const actor = currentUser?.username || 'isci';
+    const nowIso = new Date().toISOString();
+    const idemKey = params.idempotencyKey?.trim();
+
+    if (idemKey && usedIdempotencyKeysRef.current.has(idemKey)) {
+      return { success: false, error: 'Bu əməliyyat artıq icra olunub.' };
+    }
+    if (qty <= 0) {
+      return { success: false, error: 'Məhsul miqdarı ən azı 1 ədəd olmalıdır!' };
+    }
+
+    const existing = customerAccounts.find(c => c.id === params.customerId);
+    if (!existing) {
+      return { success: false, error: 'Müştəri hesabı tapılmadı!' };
+    }
+
+    const prod = products.find(p => p.id === params.productId);
+    if (!prod) {
+      return { success: false, error: 'Seçilən məhsul depoda tapılmadı!' };
+    }
+
+    const stockInfo = calculateProductStock(prod, purchases, sales, settings.minStockThreshold);
+    if (stockInfo.activeStock < qty) {
+      return {
+        success: false,
+        error: `"${prod.name}" üçün depoda kifayət qədər stok yoxdur! Mövcud: ${stockInfo.activeStock} əd., Tələb: ${qty} əd.`,
+      };
+    }
+
+    const unitPrice = round2(Number(prod.salePrice) || 0);
+    const totalAmount = round2(unitPrice * qty);
+    if (existing.balance + 0.001 < totalAmount) {
+      return {
+        success: false,
+        error: `Müştərinin balansında kifayət qədər vəsait yoxdur! Balans: ${existing.balance.toFixed(2)} AZN, Tələb: ${totalAmount.toFixed(2)} AZN`,
+      };
+    }
+
+    const opSig = `product_out:${existing.id}:${prod.id}:${qty}:${date}:${time}`;
+    const nowTs = Date.now();
+    if (lastBalanceOpGuardRef.current.sig === opSig && nowTs - lastBalanceOpGuardRef.current.ts < 800) {
+      return { success: false, error: 'Əməliyyat artıq icra olunur.' };
+    }
+    lastBalanceOpGuardRef.current = { sig: opSig, ts: nowTs };
+    if (idemKey) usedIdempotencyKeysRef.current.add(idemKey);
+
+    let saleId = `sale-${nowTs}`;
+    let txId = `ctx-${nowTs + 1}`;
+    let dmId = `dm-${nowTs + 2}`;
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const rpcRes = await supabase.rpc('withdraw_product_from_balance', {
+          p_customer_id: existing.id,
+          p_product_id: prod.id,
+          p_quantity: qty,
+          p_date: date,
+          p_time: time,
+          p_note: params.note?.trim() || null,
+          p_actor_username: actor,
+          p_idempotency_key: idemKey || null,
+        });
+        if (rpcRes.error && !/function|does not exist|schema cache/i.test(rpcRes.error.message || '')) {
+          return { success: false, error: rpcRes.error.message };
+        }
+        if (!rpcRes.error && rpcRes.data && typeof rpcRes.data === 'object') {
+          const dataObj = rpcRes.data as Record<string, any>;
+          if (dataObj.status === 'duplicate') {
+            return { success: false, error: 'Bu əməliyyat artıq icra olunub.' };
+          }
+          if (dataObj.sale_id) saleId = String(dataObj.sale_id);
+          if (dataObj.tx_id) txId = String(dataObj.tx_id);
+          if (dataObj.depo_movement_id) dmId = String(dataObj.depo_movement_id);
+        }
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Balansdan məhsul çıxarışı icra olunmadı.' };
+      }
+    }
+
+    const balBefore = round2(existing.balance);
+    const balAfter = Math.max(0, round2(balBefore - totalAmount));
+
+    const saleItem: SaleItem = {
+      productId: prod.id,
+      productName: prod.name,
+      quantity: qty,
+      unitPrice,
+      totalPrice: totalAmount,
+    };
+
+    const newSale: Sale = {
+      id: saleId,
+      date,
+      time,
+      items: [saleItem],
+      subtotalAmount: totalAmount,
+      discountAmount: 0,
+      totalAmount,
+      paymentType: 'balans',
+      debtorName: existing.name,
+      originalDate: date,
+      isConfirmed: true,
+      confirmedAt: nowIso,
+      confirmedBy: actor,
+      createdAt: nowIso,
+      createdBy: actor,
+    };
+
+    const tx: CustomerTransaction = {
+      id: txId,
+      customerId: existing.id,
+      customerName: existing.name,
+      type: 'product_out',
+      amount: totalAmount,
+      balanceBefore: balBefore,
+      balanceAfter: balAfter,
+      paymentMethod: 'balans',
+      productId: prod.id,
+      productName: prod.name,
+      quantity: qty,
+      unitPrice,
+      items: [saleItem],
+      saleId,
+      date,
+      time,
+      note: params.note?.trim() || `${prod.name} × ${qty} əd. (${unitPrice.toFixed(2)} AZN)`,
+      createdBy: actor,
+      idempotencyKey: idemKey,
+      createdAt: nowIso,
+    };
+
+    const updatedAcc: CustomerAccount = {
+      ...existing,
+      balance: balAfter,
+      totalSpent: round2(existing.totalSpent + totalAmount),
+      updatedAt: nowIso,
+      updatedBy: actor,
+      transactions: [tx, ...(existing.transactions || [])],
+    };
+
+    const dm: DepoMovement = {
+      id: dmId,
+      movementType: 'balance_product_out',
+      productId: prod.id,
+      productName: prod.name,
+      quantityDelta: -qty,
+      stockBefore: stockInfo.activeStock,
+      stockAfter: stockInfo.activeStock - qty,
+      unitPrice,
+      totalAmount,
+      customerName: existing.name,
+      referenceId: saleId,
+      date,
+      time,
+      sourceLabel: 'Müştəri balansından çıxarış',
+      note: `${existing.name} · Müştəri balansından çıxarış`,
+      createdBy: actor,
+      idempotencyKey: idemKey,
+      createdAt: nowIso,
+    };
+
+    const updatedSales = [newSale, ...sales];
+    setSales(updatedSales);
+    setCustomerAccounts(prev => prev.map(c => (c.id === existing.id ? updatedAcc : c)));
+    setDepoMovements(prev => [dm, ...prev]);
+
+    // Fallback direct writes if RPC wasn't present
+    if (supabase) {
+      upsertSaleSafe(newSale, false);
+      upsertCustomerAccountSafe(updatedAcc, true);
+      safeDbExec(supabase.from('customer_balance_transactions').insert(mapCustomerBalanceTxToDB(tx, existing.id, existing.name)));
+      safeDbExec(supabase.from('depo_movements').insert(mapDepoMovementToDB(dm)));
+    }
+
+    if (settings.enablePushNotifications) {
+      const nextStock = stockInfo.activeStock - qty;
+      if (nextStock <= (prod.minStockAlert ?? settings.minStockThreshold)) {
+        sendLowStockNotification(prod.name, nextStock, settings.minStockThreshold);
+      }
+    }
 
     playAlertSound('success');
-    addAuditLog('Müştəri Balansı Artırıldı', `${cleanName}: +${amount.toFixed(2)} AZN (${paymentType.toUpperCase()})`);
+    addAuditLog(
+      'Balansdan Məhsul Çıxarıldı',
+      `${existing.name}: ${prod.name} × ${qty} (${totalAmount.toFixed(2)} AZN) · Depo: ${stockInfo.activeStock} -> ${stockInfo.activeStock - qty} · Balans qalığı: ${balAfter.toFixed(2)} AZN`
+    );
+
+    return { success: true, saleId };
+  };
+
+  const adjustCustomerBalance = async (
+    params: AdjustCustomerBalanceParams
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (currentUser?.role !== 'admin') {
+      return { success: false, error: 'İcazə yoxdur: Yalnız Admin müştəri balansını redaktə edə bilər!' };
+    }
+    const existing = customerAccounts.find(c => c.id === params.customerId);
+    if (!existing) {
+      return { success: false, error: 'Müştəri hesabı tapılmadı!' };
+    }
+
+    const round2 = (v: number) => Math.round(v * 100) / 100;
+    const actor = currentUser?.username || 'admin';
+    const nowIso = new Date().toISOString();
+    const date = (params.date || getTodayISODate()).split('T')[0];
+    const time = params.time || getCurrentTimeHHMM();
+    const cleanName = params.name?.trim() || existing.name;
+
+    let nextBalance = existing.balance;
+    let nextTransactions = existing.transactions || [];
+    let adjustmentTx: CustomerTransaction | null = null;
+
+    if (params.newBalance !== undefined && Number.isFinite(params.newBalance)) {
+      const targetBal = Math.max(0, round2(params.newBalance));
+      const delta = round2(targetBal - existing.balance);
+      if (Math.abs(delta) >= 0.01) {
+        if (!params.reason || !params.reason.trim()) {
+          return { success: false, error: 'Balans dəyişikliyi üçün səbəb/qeyd daxil edin!' };
+        }
+        nextBalance = targetBal;
+        adjustmentTx = {
+          id: `ctx-${Date.now()}`,
+          customerId: existing.id,
+          customerName: cleanName,
+          type: 'adjustment',
+          amount: Math.abs(delta),
+          balanceBefore: existing.balance,
+          balanceAfter: targetBal,
+          adjustmentDirection: delta > 0 ? 'increase' : 'decrease',
+          date,
+          time,
+          note: params.reason.trim(),
+          createdBy: actor,
+          createdAt: nowIso,
+        };
+        nextTransactions = [adjustmentTx, ...nextTransactions];
+      }
+    }
+
+    const updatedAcc: CustomerAccount = {
+      ...existing,
+      name: cleanName,
+      phone: params.phone !== undefined ? params.phone.trim() || undefined : existing.phone,
+      notes: params.notes !== undefined ? params.notes.trim() || undefined : existing.notes,
+      balance: nextBalance,
+      transactions: nextTransactions,
+      updatedAt: nowIso,
+      updatedBy: actor,
+    };
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        const rpcRes = await supabase.rpc('adjust_customer_balance', {
+          p_customer_id: existing.id,
+          p_name: cleanName,
+          p_phone: updatedAcc.phone ?? '',
+          p_notes: updatedAcc.notes ?? '',
+          p_new_balance: params.newBalance !== undefined ? nextBalance : null,
+          p_reason: params.reason?.trim() || null,
+          p_date: date,
+          p_time: time,
+          p_actor_username: actor,
+        });
+        if (rpcRes.error && !/function|does not exist|schema cache/i.test(rpcRes.error.message || '')) {
+          return { success: false, error: rpcRes.error.message };
+        }
+        if (rpcRes.error) {
+          upsertCustomerAccountSafe(updatedAcc, true);
+          if (adjustmentTx) {
+            safeDbExec(supabase.from('customer_balance_transactions').insert(mapCustomerBalanceTxToDB(adjustmentTx, existing.id, cleanName)));
+          }
+        }
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Redaktə zamanı xəta baş verdi.' };
+      }
+    }
+
+    setCustomerAccounts(prev => prev.map(c => (c.id === existing.id ? updatedAcc : c)));
+    addAuditLog(
+      'Müştəri Balansı Redaktə Edildi',
+      `${cleanName}: Balans ${existing.balance.toFixed(2)} -> ${nextBalance.toFixed(2)} AZN${adjustmentTx ? ` (${adjustmentTx.note})` : ''}`
+    );
+
+    return { success: true };
   };
 
   const chargeCustomerBalance = (
     customerName: string,
     amount: number,
     note?: string,
-    saleId?: string
+    saleId?: string,
+    customDate?: string,
+    customTime?: string,
+    items?: SaleItem[]
   ): boolean => {
     const cleanName = customerName.trim();
     const existing = customerAccounts.find(c => c.name.toLowerCase() === cleanName.toLowerCase());
@@ -1158,23 +1960,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return false;
     }
 
+    const round2 = (v: number) => Math.round(v * 100) / 100;
+    const date = (customDate || getTodayISODate()).split('T')[0];
+    const time = customTime || getCurrentTimeHHMM();
+    const actor = currentUser?.username || 'isci';
+    const nowIso = new Date().toISOString();
+    const balBefore = round2(existing.balance);
+    const newBalance = Math.max(0, round2(balBefore - amount));
+    const singleItem = items && items.length === 1 ? items[0] : undefined;
+
     const tx: CustomerTransaction = {
       id: `ctx-${Date.now()}`,
-      type: 'charge',
-      amount,
-      date: getTodayISODate(),
-      time: getCurrentTimeHHMM(),
-      note: note || 'Bar alış-verişi (Balansdan çıxılma)',
+      customerId: existing.id,
+      customerName: existing.name,
+      type: items && items.length > 0 ? 'product_out' : 'charge',
+      amount: round2(amount),
+      balanceBefore: balBefore,
+      balanceAfter: newBalance,
+      paymentMethod: 'balans',
+      productId: singleItem?.productId,
+      productName: singleItem?.productName || (items && items.length > 1 ? items.map(i => `${i.productName} ×${i.quantity}`).join(', ') : undefined),
+      quantity: singleItem?.quantity,
+      unitPrice: singleItem?.unitPrice,
+      items,
+      date,
+      time,
+      note:
+        note ||
+        (items && items.length > 0
+          ? items.map(i => `${i.productName} × ${i.quantity}`).join(', ')
+          : 'Bar alış-verişi (Balansdan çıxılma)'),
       saleId,
-      createdBy: currentUser?.username || 'isci',
+      createdBy: actor,
+      createdAt: nowIso,
     };
 
-    const newBalance = Math.round((existing.balance - amount) * 100) / 100;
     const newAcc: CustomerAccount = {
       ...existing,
       balance: newBalance,
-      totalSpent: Math.round((existing.totalSpent + amount) * 100) / 100,
-      updatedAt: new Date().toISOString(),
+      totalSpent: round2(existing.totalSpent + amount),
+      updatedAt: nowIso,
+      updatedBy: actor,
       transactions: [tx, ...(existing.transactions || [])],
     };
 
@@ -1182,7 +2008,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const supabase = getSupabaseClient();
     if (supabase) {
-      safeDbExec(supabase.from('customer_accounts').update(mapCustomerAccountToDB(newAcc)).eq('id', existing.id));
+      upsertCustomerAccountSafe(newAcc, true);
+      safeDbExec(supabase.from('customer_balance_transactions').insert(mapCustomerBalanceTxToDB(tx, existing.id, existing.name)));
     }
 
     addAuditLog('Balansdan Çıxıldı', `${cleanName}: -${amount.toFixed(2)} AZN (Qalıq balans: ${newBalance.toFixed(2)} AZN)`);
@@ -1300,13 +2127,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           error: `Balansda kifayət qədər vəsait yoxdur! Cari balans: ${existing.balance.toFixed(2)} AZN, Tələb olunan: ${totalAmount.toFixed(2)} AZN`,
         };
       }
-      chargeCustomerBalance(custName, totalAmount, `Satış #${saleId}`, saleId);
+      chargeCustomerBalance(
+        custName,
+        totalAmount,
+        resolvedItems.map(i => `${i.productName} × ${i.quantity}`).join(', '),
+        saleId,
+        date,
+        time,
+        resolvedItems
+      );
     }
 
     lastSaleGuardRef.current = { sig: saleSig, ts: nowTs };
 
-    // Credit sales are immediately confirmed so stock & debt reflect right away
-    const isConfirmed = saleData.paymentType === 'borc' ? true : settings.autoConfirmSales;
+    // Credit sales & Balance product withdrawals are immediately confirmed so stock & reports reflect right away
+    const isConfirmed =
+      saleData.paymentType === 'borc' || saleData.paymentType === 'balans'
+        ? true
+        : settings.autoConfirmSales;
     const cleanDebtorName = saleData.debtorName?.trim() || undefined;
     const cleanDebtorPhone = saleData.debtorPhone?.trim() || undefined;
 
@@ -2100,6 +2938,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         purchases,
         addPurchase,
         deletePurchase,
+        depoMovements,
+        recordManualDepoAdjustment,
         sales,
         addSale,
         updateSaleDate,
@@ -2113,6 +2953,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         deleteDebtPayment,
         customerAccounts,
         depositToCustomer,
+        openOrDepositCustomerBalance,
+        withdrawCustomerCash,
+        withdrawProductFromBalance,
+        adjustCustomerBalance,
         chargeCustomerBalance,
         deleteCustomerAccount,
         dailyReports,

@@ -151,10 +151,11 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
         debts,
         purchases,
         expenses,
+        customerAccounts,
         startDate: dateRange.startDate,
         endDate: dateRange.endDate,
       }),
-    [sales, debts, purchases, expenses, dateRange]
+    [sales, debts, purchases, expenses, customerAccounts, dateRange]
   );
 
   // Collected debt payments count / total in selected period
@@ -1243,13 +1244,16 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
 
               <div className="p-4 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-center">
                 <span className="text-xs font-bold text-red-600 dark:text-red-400 uppercase tracking-wider block">
-                  Çıxan Pullar (Alış + Xərc) (−)
+                  Çıxan Pullar (−)
                 </span>
                 <span className="text-xl font-black text-red-600 dark:text-red-400 font-mono mt-1 block">
                   − {formatAZN(periodMetrics.totalCashOutflow)}
                 </span>
                 <span className="text-[11px] text-zinc-500 dark:text-zinc-400">
                   Alış: {formatAZN(periodPurchasesAmount)} · Xərc: {formatAZN(periodExpensesAmount)}
+                  {periodMetrics.balanceCashWithdrawals > 0
+                    ? ` · Balans çıxışı: ${formatAZN(periodMetrics.balanceCashWithdrawals)}`
+                    : ''}
                 </span>
               </div>
 
