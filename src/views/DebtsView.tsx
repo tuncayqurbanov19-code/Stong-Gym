@@ -406,25 +406,27 @@ export const DebtsView: React.FC = () => {
     return map;
   }, [products, purchases, sales, settings.minStockThreshold]);
 
-  // Calculate Debt Overview + Today Collected Debt Payments
-  const overview = useMemo(() => calculateDebtOverview(debts), [debts]);
+  const activeDebts = useMemo(() => debts.filter(d => !d.isCancelled), [debts]);
+
+  // Calculate Debt Overview + Today Collected Debt Payments (excluding upfront sale splits)
+  const overview = useMemo(() => calculateDebtOverview(activeDebts), [activeDebts]);
 
   const todayCollectedSummary = useMemo(() => {
-    const todayPayments = debts
+    const todayPayments = activeDebts
       .flatMap(d => d.payments || [])
-      .filter(p => (p.paidAt || p.date || '').split('T')[0] === todayISO);
+      .filter(p => !p.isUpfront && (p.paidAt || p.date || '').split('T')[0] === todayISO);
     const total = todayPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
     return {
       total: round2(total),
       count: todayPayments.length,
     };
-  }, [debts, todayISO]);
+  }, [activeDebts, todayISO]);
 
   // Group debts by normalized Debtor Name cleanly
   const allDebtors = useMemo<DebtorGroup[]>(() => {
     const debtorsMap: Record<string, DebtorGroup> = {};
 
-    for (const d of debts) {
+    for (const d of activeDebts) {
       const key = d.debtorName.trim().toLowerCase();
       if (!debtorsMap[key]) {
         debtorsMap[key] = {
@@ -482,7 +484,7 @@ export const DebtsView: React.FC = () => {
         return grp;
       })
       .sort((a, b) => b.remainingDebt - a.remainingDebt || b.lastDate.localeCompare(a.lastDate));
-  }, [debts]);
+  }, [activeDebts]);
 
   // STRICT SPLIT: Active Debtors vs Settled Archive
   const activeDebtors = useMemo(
@@ -531,7 +533,7 @@ export const DebtsView: React.FC = () => {
   const filteredRecords = useMemo(
     () => {
       const q = searchQuery.trim().toLowerCase();
-      return debts
+      return activeDebts
         .filter(d => {
           const matchesSearch =
             !q ||
@@ -548,13 +550,13 @@ export const DebtsView: React.FC = () => {
         })
         .sort((a, b) => b.date.localeCompare(a.date));
     },
-    [debts, searchQuery, statusFilter, dateFilter]
+    [activeDebts, searchQuery, statusFilter, dateFilter]
   );
 
   const handleDebtorNameTyping = (nameVal: string) => {
     setDebtorName(nameVal);
     if (nameVal.trim().length >= 2) {
-      const check = checkCustomerDebt(nameVal, debts);
+      const check = checkCustomerDebt(nameVal, activeDebts);
       const matched = allDebtors.find(
         d => d.debtorName.toLowerCase() === nameVal.trim().toLowerCase()
       );
@@ -938,6 +940,15 @@ export const DebtsView: React.FC = () => {
                           <span className="font-mono tabular-nums text-zinc-500">
                             {formatDateAZ(p.paidAt || p.date)}
                           </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${
+                              p.isUpfront
+                                ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                            }`}
+                          >
+                            {p.isUpfront ? 'İlkin ödəniş' : 'Borc ödənişi'}
+                          </span>
                           <span className="px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-bold text-[10px]">
                             {getMethodLabel(p.paymentMethod)}
                           </span>
@@ -1045,7 +1056,7 @@ export const DebtsView: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => exportDebtsToCSV(debts)}
+            onClick={() => exportDebtsToCSV(activeDebts)}
             className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0"
           >
             <Download className="w-3.5 h-3.5" />
@@ -1086,6 +1097,28 @@ export const DebtsView: React.FC = () => {
             <Plus className="w-4 h-4" />
             <span>Yeni Borc Yaz</span>
           </button>
+        </div>
+      </div>
+
+      {/* Clear Rule Banner: Borc vs Müştəri Balansı */}
+      <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+        <div className="flex items-start gap-2">
+          <BookOpen className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+          <div>
+            <strong className="text-zinc-900 dark:text-white">Borc (Nisyə):</strong>{' '}
+            <span className="text-zinc-600 dark:text-zinc-400">
+              Müştəri məhsulu alıb pulunu ödəmədikdə və ya qismən ödədikdə avtomatik yaranır. Ödənilən qism dərhal kassaya, qalan məbləğ isə borca yazılır.
+            </span>
+          </div>
+        </div>
+        <div className="flex items-start gap-2">
+          <Wallet className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+          <div>
+            <strong className="text-zinc-900 dark:text-white">Müştəri Balansı (Avans):</strong>{' '}
+            <span className="text-zinc-600 dark:text-zinc-400">
+              Əvvəlcədən yatırılan vəsait satış deyil; balansdan məhsul götürüləndə satış dövriyyəsinə yazılır, kassaya yeni pul girmir.
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1272,7 +1305,7 @@ export const DebtsView: React.FC = () => {
                 : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
             }`}
           >
-            Bütün Qeydlər ({debts.length})
+            Bütün Qeydlər ({activeDebts.length})
           </button>
 
           <button
@@ -1485,6 +1518,15 @@ export const DebtsView: React.FC = () => {
                                           <div className="flex flex-wrap items-center gap-1.5">
                                             <span className="font-mono tabular-nums text-[11px] text-zinc-500">
                                               {formatDateAZ(p.paidAt || p.date)}
+                                            </span>
+                                            <span
+                                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                                p.isUpfront
+                                                  ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800'
+                                                  : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                                              }`}
+                                            >
+                                              {p.isUpfront ? 'Satış zamanı ilkin ödəniş' : 'Borc ödənişi'}
                                             </span>
                                             <span className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-[10px] font-bold">
                                               {getMethodLabel(p.paymentMethod)}

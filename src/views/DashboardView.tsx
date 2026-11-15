@@ -123,7 +123,7 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
   }, [period, todayISO, currentMonth, customStart, customEnd]);
 
   // Filtered dataset for selected period
-  const confirmedSales = useMemo(() => sales.filter(s => s.isConfirmed), [sales]);
+  const confirmedSales = useMemo(() => sales.filter(s => !s.isCancelled && s.isConfirmed), [sales]);
 
   const periodSales = useMemo(() => {
     return confirmedSales.filter(
@@ -219,12 +219,13 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
     [customerAccounts]
   );
 
-  // Today's debt payments for drawer discrepancy verification
+  // Today's debt payments for drawer discrepancy verification (excludes upfront sale splits)
   const todayDebtPayments = useMemo(
     () =>
       debts
+        .filter(d => !d.isCancelled)
         .flatMap(d => d.payments || [])
-        .filter(p => (p.paidAt || p.date || '').split('T')[0] === todayISO),
+        .filter(p => !p.isUpfront && (p.paidAt || p.date || '').split('T')[0] === todayISO),
     [debts, todayISO]
   );
   const todayDebtTotal = useMemo(
@@ -236,7 +237,7 @@ export const DashboardView: React.FC<{ onNavigate: (tab: string) => void }> = ({
   const todayReport = dailyReports.find(r => r.date === todayISO);
   const discrepancy = checkDailyReportDiscrepancy(
     todayReport,
-    sales.filter(s => s.date === todayISO),
+    sales.filter(s => !s.isCancelled && s.date === todayISO),
     todayDebtPayments
   );
 

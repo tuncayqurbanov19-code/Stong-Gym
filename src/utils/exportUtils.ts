@@ -1,6 +1,13 @@
 import { DailyReport, DebtRecord, Expense, Product, PurchaseIntake, Sale } from '../types';
 import { formatAZN, formatDateAZ } from './dateUtils';
-import { DailyStaffBreakdownSummary } from './financialCalculations';
+import {
+  BalanceCashWithdrawalItem,
+  BalanceProductWithdrawalItem,
+  DailyStaffBreakdownSummary,
+  FinancialMetricsSummary,
+  formatSalePaymentLabel,
+  ProductMethodBreakdownSummary,
+} from './financialCalculations';
 
 /**
  * Downloads a string content as a file in the browser
@@ -54,6 +61,7 @@ export function exportSalesToCSV(sales: Sale[]): void {
     'Satış Tarixi',
     'Saat',
     'Ödəniş Növü',
+    'Status',
     'Məhsullar',
     'Ara Cəm (AZN)',
     'Endirim (AZN)',
@@ -62,6 +70,7 @@ export function exportSalesToCSV(sales: Sale[]): void {
     'Telefon',
     'Təsdiqlənib',
     'Məsul',
+    'Ləğv / Qeyd',
     'Faktiki Daxilolma',
   ];
   const rows = sales.map(s => {
@@ -70,7 +79,8 @@ export function exportSalesToCSV(sales: Sale[]): void {
       escapeCsvField(s.id),
       escapeCsvField(formatDateAZ(s.date)),
       escapeCsvField(s.time),
-      escapeCsvField(s.paymentType.toUpperCase()),
+      escapeCsvField(formatSalePaymentLabel(s)),
+      escapeCsvField(s.isCancelled ? 'Ləğv edilib' : 'Aktiv'),
       escapeCsvField(itemsSummary),
       escapeCsvField(s.subtotalAmount ?? s.totalAmount + (s.discountAmount || 0)),
       escapeCsvField(s.discountAmount || 0),
@@ -79,6 +89,7 @@ export function exportSalesToCSV(sales: Sale[]): void {
       escapeCsvField(s.debtorPhone || ''),
       escapeCsvField(s.isConfirmed ? 'Bəli' : 'Xeyr'),
       escapeCsvField(s.createdBy),
+      escapeCsvField(s.isCancelled ? s.cancelReason || 'Ləğv edilib' : ''),
       escapeCsvField(s.createdAt ? new Date(s.createdAt).toLocaleString('az-AZ') : ''),
     ];
   });
@@ -183,6 +194,113 @@ export function exportDailyReportsToCSV(reports: DailyReport[]): void {
 
   const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\r\n');
   downloadFile(csvContent, `Gundelik_Hesabatlar_${new Date().toISOString().slice(0, 10)}.csv`);
+}
+
+/**
+ * Exports full executive single-page daily report (Summary A/B/C, Product breakdown by payment method,
+ * Balance withdrawals, and Staff performance) to Excel-compatible UTF-8 CSV
+ */
+export function exportFullDailyReportToCSV(params: {
+  date: string;
+  appName: string;
+  metrics: FinancialMetricsSummary;
+  productMethods: { label: string; summary: ProductMethodBreakdownSummary }[];
+  staffSummary: DailyStaffBreakdownSummary;
+  balanceProductWithdrawals: BalanceProductWithdrawalItem[];
+  balanceCashWithdrawals: BalanceCashWithdrawalItem[];
+}): void {
+  const {
+    date,
+    appName,
+    metrics,
+    productMethods,
+    staffSummary,
+    balanceProductWithdrawals,
+    balanceCashWithdrawals,
+  } = params;
+
+  const lines: string[] = [];
+  const pushRow = (cols: unknown[]) => lines.push(cols.map(escapeCsvField).join(','));
+
+  pushRow([`${appName} — GÜNDƏLİK MALİYYƏ VƏ SATIŞ HESABATI`, formatDateAZ(date)]);
+  lines.push('');
+
+  pushRow(['A. ÜMUMİ SATIŞ DÖVRİYYƏSİ (MƏHSUL / XİDMƏT)', 'MƏBLƏĞ (AZN)']);
+  pushRow(['Ümumi satış məbləği', metrics.grossSalesTotal.toFixed(2)]);
+  pushRow(['Nağd satış', metrics.cashSales.toFixed(2)]);
+  pushRow(['Kart satış', metrics.cardSales.toFixed(2)]);
+  pushRow(['POS satış', metrics.posSales.toFixed(2)]);
+  pushRow(['Borc (nisyə) satış', metrics.creditSales.toFixed(2)]);
+  pushRow(['Müştəri balansından məhsul götürülməsi (satışa daxil, kassaya girmir)', metrics.balanceSales.toFixed(2)]);
+  lines.push('');
+
+  pushRow(['B. FAKTİKİ KASSAYA DAXİL OLAN VƏSAİT', 'MƏBLƏĞ (AZN)']);
+  pushRow(['Satışdan faktiki daxil olan (Nağd + Kart + POS)', metrics.salesRealInflow.toFixed(2)]);
+  pushRow(['  o cümlədən Nağd', metrics.cashSales.toFixed(2)]);
+  pushRow(['  o cümlədən Kart', metrics.cardSales.toFixed(2)]);
+  pushRow(['  o cümlədən POS', metrics.posSales.toFixed(2)]);
+  pushRow(['Əvvəlki borcların ödənişi', metrics.debtCollectedTotal.toFixed(2)]);
+  pushRow(['Yekun faktiki daxilolma', metrics.actualDrawerInflow.toFixed(2)]);
+  lines.push('');
+
+  pushRow(['C. PUL ÇIXIŞLARI VƏ KASSADA OLMALI MƏBLƏĞ', 'MƏBLƏĞ (AZN)']);
+  pushRow(['Mal alışı xərci', metrics.purchasesOutflow.toFixed(2)]);
+  pushRow(['Digər xərclər', metrics.expensesOutflow.toFixed(2)]);
+  pushRow(['Balansdan sərbəst pul çıxarılması', metrics.balanceCashWithdrawals.toFixed(2)]);
+  pushRow(['Cəmi çıxış', metrics.totalCashOutflow.toFixed(2)]);
+  pushRow(['Kassada olması lazım olan xalis məbləğ', metrics.netCashBalance.toFixed(2)]);
+  pushRow(['Aktiv ödənilməmiş ümumi borc qalığı (sistem üzrə)', metrics.totalUnpaidDebts.toFixed(2)]);
+  pushRow(['Müştəri balansına yatırılan yeni depozitlər (satış deyil)', metrics.balanceDepositsTotal.toFixed(2)]);
+  lines.push('');
+
+  for (const pm of productMethods) {
+    if (pm.summary.items.length === 0) continue;
+    pushRow([`ÖDƏNİŞ NÖVÜ ÜZRƏ MƏHSULLAR: ${pm.label.toUpperCase()}`, 'Say', 'Orta Vahid Qiymət (AZN)', 'Cəmi (AZN)', 'Saat / Məsul / Müştəri']);
+    for (const item of pm.summary.items) {
+      const occText = item.occurrences
+        .map(o => `${o.time} (${o.quantity} əd. · ${o.amount.toFixed(2)} AZN · ${o.staffName}${o.customerName ? ` · ${o.customerName}` : ''})`)
+        .join(' | ');
+      pushRow([item.productName, item.quantity, item.unitPrice.toFixed(2), item.totalAmount.toFixed(2), occText]);
+    }
+    pushRow([`${pm.label} YEKUN`, pm.summary.totalQuantity, '', pm.summary.totalAmount.toFixed(2), '']);
+    lines.push('');
+  }
+
+  pushRow(['MƏSUL ƏMƏKDAŞ ÜZRƏ HESABAT', 'Nağd', 'Kart', 'POS', 'Balans', 'Nisyə', 'Ümumi Satış', 'Borc Ödənişi Qəbulu', 'Faktiki Daxilolma', 'Satdığı Məhsullar']);
+  for (const r of staffSummary.rows) {
+    const prodList = r.soldProducts.map(p => `${p.productName} (${p.quantity} əd. · ${p.totalAmount.toFixed(2)} AZN)`).join('; ');
+    pushRow([
+      `${r.staffName} (@${r.staffUsername})`,
+      r.naqd.toFixed(2),
+      r.kart.toFixed(2),
+      r.pos.toFixed(2),
+      r.balans.toFixed(2),
+      r.nisye.toFixed(2),
+      r.grossSales.toFixed(2),
+      r.debtInflow.toFixed(2),
+      r.totalInflow.toFixed(2),
+      prodList,
+    ]);
+  }
+  lines.push('');
+
+  if (balanceProductWithdrawals.length > 0) {
+    pushRow(['BALANSDAN MƏHSUL GÖTÜRÜLMƏSİ DETALLARI', 'Müştəri', 'Məhsul', 'Say', 'Qiymət', 'Cəmi (AZN)', 'Məsul']);
+    for (const b of balanceProductWithdrawals) {
+      pushRow([b.time, b.customerName, b.productName, b.quantity, b.unitPrice.toFixed(2), b.totalAmount.toFixed(2), b.createdBy]);
+    }
+    lines.push('');
+  }
+
+  if (balanceCashWithdrawals.length > 0) {
+    pushRow(['BALANSDAN SƏRBƏST PUL ÇIXARIŞLARI', 'Müştəri', 'Məbləğ (AZN)', 'Metod', 'Məsul', 'Qeyd']);
+    for (const w of balanceCashWithdrawals) {
+      pushRow([w.time, w.customerName, w.amount.toFixed(2), w.paymentMethod.toUpperCase(), w.createdBy, w.note || '']);
+    }
+  }
+
+  const csvContent = '\uFEFF' + lines.join('\r\n');
+  downloadFile(csvContent, `Gundelik_Tam_Hesabat_${date}.csv`);
 }
 
 /**

@@ -164,6 +164,7 @@ export function mapSaleToDB(s: Sale) {
     discount_amount: s.discountAmount || 0,
     total_amount: s.totalAmount,
     payment_type: s.paymentType,
+    payment_split: s.paymentSplit || null,
     debtor_name: s.debtorName || null,
     debtor_phone: s.debtorPhone || null,
     original_date: s.originalDate || s.date,
@@ -172,6 +173,11 @@ export function mapSaleToDB(s: Sale) {
     is_confirmed: s.isConfirmed,
     confirmed_at: s.confirmedAt || null,
     confirmed_by: s.confirmedBy || null,
+    is_cancelled: Boolean(s.isCancelled),
+    cancelled_at: s.cancelledAt || null,
+    cancelled_by: s.cancelledBy || null,
+    cancel_reason: s.cancelReason || null,
+    edit_history: s.editHistory || [],
     created_at: s.createdAt,
     created_by: s.createdBy,
   };
@@ -184,7 +190,7 @@ export function mapSaleToLegacyDB(s: Sale) {
     time: s.time,
     items: s.items,
     total_amount: s.totalAmount,
-    payment_type: s.paymentType,
+    payment_type: s.paymentType === 'qarisik' ? (Number(s.paymentSplit?.borc) > 0 ? 'borc' : 'naqd') : s.paymentType,
     debtor_name: s.debtorName || null,
     is_confirmed: s.isConfirmed,
     confirmed_at: s.confirmedAt || null,
@@ -209,6 +215,7 @@ export function mapDBToSale(row: any): Sale {
     discountAmount,
     totalAmount,
     paymentType: row.payment_type,
+    paymentSplit: row.payment_split || undefined,
     debtorName: row.debtor_name || undefined,
     debtorPhone: row.debtor_phone || undefined,
     originalDate: row.original_date || undefined,
@@ -217,6 +224,11 @@ export function mapDBToSale(row: any): Sale {
     isConfirmed: Boolean(row.is_confirmed),
     confirmedAt: row.confirmed_at || undefined,
     confirmedBy: row.confirmed_by || undefined,
+    isCancelled: Boolean(row.is_cancelled),
+    cancelledAt: row.cancelled_at || undefined,
+    cancelledBy: row.cancelled_by || undefined,
+    cancelReason: row.cancel_reason || undefined,
+    editHistory: Array.isArray(row.edit_history) ? row.edit_history : undefined,
     createdAt: row.created_at,
     createdBy: row.created_by,
   };
@@ -264,6 +276,9 @@ export function mapDebtToDB(d: DebtRecord) {
     sale_id: d.saleId || null,
     notes: d.notes || null,
     payments: d.payments || [],
+    is_cancelled: Boolean(d.isCancelled),
+    cancelled_at: d.cancelledAt || null,
+    cancelled_by: d.cancelledBy || null,
     created_at: d.createdAt,
     updated_at: d.updatedAt,
   };
@@ -301,6 +316,9 @@ export function mapDBToDebt(row: any): DebtRecord {
     saleId: row.sale_id || undefined,
     notes: row.notes || undefined,
     payments: row.payments || [],
+    isCancelled: Boolean(row.is_cancelled),
+    cancelledAt: row.cancelled_at || undefined,
+    cancelledBy: row.cancelled_by || undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -569,6 +587,7 @@ export function mapDBToDebtPayment(row: any) {
     paymentMethod: (row.payment_method || 'naqd') as 'naqd' | 'kart' | 'pos' | 'kocurme',
     receivedBy: row.received_by || 'admin',
     note: row.note || undefined,
+    isUpfront: Boolean(row.is_upfront),
     createdAt: row.created_at || new Date().toISOString(),
   };
 }
@@ -582,6 +601,7 @@ export function mapDebtPaymentToDB(p: {
   paidAt?: string;
   date?: string;
   note?: string;
+  isUpfront?: boolean;
   createdAt?: string;
 }) {
   return {
@@ -592,6 +612,7 @@ export function mapDebtPaymentToDB(p: {
     received_by: p.receivedBy || 'admin',
     paid_at: p.paidAt || p.date || new Date().toISOString().slice(0, 10),
     note: p.note || null,
+    is_upfront: Boolean(p.isUpfront),
     created_at: p.createdAt || new Date().toISOString(),
   };
 }

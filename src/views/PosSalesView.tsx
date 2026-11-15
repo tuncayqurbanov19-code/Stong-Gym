@@ -27,9 +27,11 @@ import {
   CameraOff,
   Lock,
   Unlock,
+  Layers,
+  Ban,
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
-import { PaymentType, Product, Sale } from '../types';
+import { PaymentType, Product, Sale, SalePaymentSplit } from '../types';
 import {
   formatAZN,
   formatDateAZ,
@@ -39,7 +41,12 @@ import {
   getMonthLabelAZ,
 } from '../utils/dateUtils';
 import { calculateAllProductStocks } from '../utils/stockCalculations';
-import { calculateFinancialMetricsForRange, checkCustomerDebt } from '../utils/financialCalculations';
+import {
+  calculateFinancialMetricsForRange,
+  checkCustomerDebt,
+  formatSalePaymentLabel,
+  resolveSalePaymentSplit,
+} from '../utils/financialCalculations';
 import {
   buildBarcodeIndex,
   hasLongerBarcodePrefixInIndex,
@@ -57,6 +64,8 @@ interface CartItem {
   quantity: number;
 }
 
+const round2 = (v: number) => Math.round(v * 100) / 100;
+
 export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onNavigateToDebts }) => {
   const {
     products,
@@ -70,7 +79,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     updateSaleDate,
     confirmSale,
     confirmDaySales,
-    deleteSale,
+    cancelSale,
     currentUser,
     settings,
     showToast,
@@ -128,8 +137,20 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [confirmDeleteSaleId, setConfirmDeleteSaleId] = useState<string | null>(null);
+  const [cancellingSale, setCancellingSale] = useState<Sale | null>(null);
+  const [cancelReasonInput, setCancelReasonInput] = useState('');
   const [isSubmittingSale, setIsSubmittingSale] = useState(false);
+
+  // Partial upfront payment for Borc mode
+  const [borcUpfrontPaid, setBorcUpfrontPaid] = useState('');
+  const [borcUpfrontMethod, setBorcUpfrontMethod] = useState<'naqd' | 'kart' | 'pos'>('naqd');
+
+  // Mixed payment (Qarışıq) channel amounts
+  const [mixNaqd, setMixNaqd] = useState('');
+  const [mixKart, setMixKart] = useState('');
+  const [mixPos, setMixPos] = useState('');
+  const [mixBalans, setMixBalans] = useState('');
+  const [mixBorc, setMixBorc] = useState('');
 
   // Edit Sale Date Modal
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
@@ -150,6 +171,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
   const [filterEndDate, setFilterEndDate] = useState(todayISO);
   const [filterProductId, setFilterProductId] = useState('all');
   const [filterPaymentType, setFilterPaymentType] = useState<'all' | PaymentType>('all');
+  const [showCancelledSales, setShowCancelledSales] = useState(true);
   const [historySearch, setHistorySearch] = useState('');
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthKey());
 
@@ -280,6 +302,13 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     setDebtorName('');
     setDebtorPhone('');
     setDiscountInput('');
+    setBorcUpfrontPaid('');
+    setBorcUpfrontMethod('naqd');
+    setMixNaqd('');
+    setMixKart('');
+    setMixPos('');
+    setMixBalans('');
+    setMixBorc('');
     setPaymentType('naqd');
     setBarcodeInput('');
     setLastAddedProductId(null);
@@ -295,6 +324,26 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
   const cartDiscount = Math.min(cartSubtotal, parsedDiscount);
   const cartFinalTotal = Math.max(0, Math.round((cartSubtotal - cartDiscount) * 100) / 100);
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+
+  // Live mixed & partial credit calculations
+  const mixSplitValues = {
+    naqd: Math.max(0, round2(parseFloat(mixNaqd) || 0)),
+    kart: Math.max(0, round2(parseFloat(mixKart) || 0)),
+    pos: Math.max(0, round2(parseFloat(mixPos) || 0)),
+    balans: Math.max(0, round2(parseFloat(mixBalans) || 0)),
+    borc: Math.max(0, round2(parseFloat(mixBorc) || 0)),
+  };
+  const mixSumTotal = round2(
+    mixSplitValues.naqd +
+      mixSplitValues.kart +
+      mixSplitValues.pos +
+      mixSplitValues.balans +
+      mixSplitValues.borc
+  );
+  const mixRemainingDelta = round2(cartFinalTotal - mixSumTotal);
+
+  const upfrontPaidNum = Math.max(0, round2(parseFloat(borcUpfrontPaid) || 0));
+  const borcRemainingNum = Math.max(0, round2(cartFinalTotal - upfrontPaidNum));
 
   // Check debtor name for existing debt + autofill phone
   const handleDebtorNameChange = (val: string) => {
@@ -447,11 +496,11 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
   // Keep scanner permanently ready when on POS tab and focus lock is ON
   useEffect(() => {
-    if (scannerFocusLock && activeSubTab === 'pos' && !isDepositModalOpen && !editingSale && !isDebtModalOpen) {
+    if (scannerFocusLock && activeSubTab === 'pos' && !isDepositModalOpen && !editingSale && !cancellingSale && !isDebtModalOpen) {
       restoreScannerFocus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scannerFocusLock, activeSubTab, isDepositModalOpen, editingSale, isDebtModalOpen]);
+  }, [scannerFocusLock, activeSubTab, isDepositModalOpen, editingSale, cancellingSale, isDebtModalOpen]);
 
   // Cleanup timers on unmount
   useEffect(() => {
@@ -471,7 +520,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     flushTimer: null,
   });
   useEffect(() => {
-    if (activeSubTab !== 'pos' || isDepositModalOpen || editingSale || isDebtModalOpen) return;
+    if (activeSubTab !== 'pos' || isDepositModalOpen || editingSale || cancellingSale || isDebtModalOpen) return;
 
     const flushBuffer = (requireRapid: boolean) => {
       const buf = scanBufferRef.current.chars.trim();
@@ -528,18 +577,42 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
         scanBufferRef.current.flushTimer = null;
       }
     };
-  }, [activeSubTab, isDepositModalOpen, editingSale, isDebtModalOpen]);
+  }, [activeSubTab, isDepositModalOpen, editingSale, cancellingSale, isDebtModalOpen]);
 
   // Submit Sale
   const handleCompleteSale = () => {
     if (cart.length === 0 || isSubmittingSale) return;
 
-    if (paymentType === 'borc' && !debtorName.trim()) {
-      showToast('error', 'Zəhmət olmasa borclunun adını və soyadını daxil edin!');
-      return;
-    }
+    let finalPaymentType: PaymentType = paymentType;
+    let finalSplit: SalePaymentSplit | undefined;
+    let finalDebtorName: string | undefined;
+    let finalDebtorPhone: string | undefined;
 
-    if (paymentType === 'balans') {
+    if (paymentType === 'borc') {
+      if (!debtorName.trim()) {
+        showToast('error', 'Zəhmət olmasa borclunun adını və soyadını daxil edin!');
+        return;
+      }
+      if (upfrontPaidNum > cartFinalTotal + 0.001) {
+        showToast('error', `Öndən ödənilən məbləğ yekun məbləğdən (${formatAZN(cartFinalTotal)}) çox ola bilməz!`);
+        return;
+      }
+      finalDebtorName = debtorName.trim();
+      finalDebtorPhone = debtorPhone.trim() || undefined;
+      if (upfrontPaidNum > 0.009 && borcRemainingNum > 0.009) {
+        finalPaymentType = 'qarisik';
+        finalSplit = {
+          [borcUpfrontMethod]: upfrontPaidNum,
+          borc: borcRemainingNum,
+        };
+      } else if (upfrontPaidNum >= cartFinalTotal - 0.009 && cartFinalTotal > 0) {
+        finalPaymentType = borcUpfrontMethod;
+        finalSplit = { [borcUpfrontMethod]: cartFinalTotal };
+      } else {
+        finalPaymentType = 'borc';
+        finalSplit = { borc: cartFinalTotal };
+      }
+    } else if (paymentType === 'balans') {
       const custName = selectedCustomerAccount.trim();
       if (!custName) {
         showToast('error', 'Zəhmət olmasa müştəri hesabını seçin!');
@@ -550,27 +623,62 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
         showToast('error', `"${custName}" adlı müştəri hesabı tapılmadı!`);
         return;
       }
-      if (existing.balance < cartFinalTotal) {
+      if (existing.balance < cartFinalTotal - 0.009) {
         showToast(
           'error',
           `Balansda kifayət qədər vəsait yoxdur! Cari balans: ${formatAZN(existing.balance)}, Tələb olunan: ${formatAZN(cartFinalTotal)}`
         );
         return;
       }
+      finalDebtorName = custName;
+    } else if (paymentType === 'qarisik') {
+      if (Math.abs(mixSumTotal - cartFinalTotal) > 0.01) {
+        showToast(
+          'error',
+          `Qarışıq ödəniş kanallarının cəmi (${formatAZN(mixSumTotal)}) yekun məbləğə (${formatAZN(cartFinalTotal)}) bərabər olmalıdır!`
+        );
+        return;
+      }
+      if (mixSplitValues.borc > 0.009 && !debtorName.trim()) {
+        showToast('error', 'Qarışıq ödənişdə borc hissəsi olduğu üçün borclunun adını daxil edin!');
+        return;
+      }
+      if (mixSplitValues.balans > 0.009) {
+        const custName = selectedCustomerAccount.trim();
+        if (!custName) {
+          showToast('error', 'Balans hissəsi üçün müştəri hesabını seçin!');
+          return;
+        }
+        const existing = customerAccounts.find(c => c.name.toLowerCase() === custName.toLowerCase());
+        if (!existing) {
+          showToast('error', `"${custName}" adlı müştəri hesabı tapılmadı!`);
+          return;
+        }
+        if (existing.balance < mixSplitValues.balans - 0.009) {
+          showToast(
+            'error',
+            `${custName} balansında kifayət qədər vəsait yoxdur (${formatAZN(existing.balance)}).`
+          );
+          return;
+        }
+        finalDebtorName = debtorName.trim() || custName;
+      } else if (mixSplitValues.borc > 0.009) {
+        finalDebtorName = debtorName.trim();
+      }
+      if (mixSplitValues.borc > 0.009) {
+        finalDebtorPhone = debtorPhone.trim() || undefined;
+      }
+      finalSplit = mixSplitValues;
     }
 
     setIsSubmittingSale(true);
     try {
       const res = addSale({
         items: cart.map(i => ({ productId: i.product.id, quantity: i.quantity })),
-        paymentType,
-        debtorName:
-          paymentType === 'borc'
-            ? debtorName.trim()
-            : paymentType === 'balans'
-            ? selectedCustomerAccount.trim()
-            : undefined,
-        debtorPhone: paymentType === 'borc' ? debtorPhone.trim() || undefined : undefined,
+        paymentType: finalPaymentType,
+        paymentSplit: finalSplit,
+        debtorName: finalDebtorName,
+        debtorPhone: finalDebtorPhone,
         discountAmount: cartDiscount,
         customDate,
         customTime,
@@ -578,8 +686,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
       if (res.success) {
         const msg =
-          paymentType === 'borc'
-            ? `Nisyə satış qeydə alındı: ${debtorName.trim()} (${formatAZN(cartFinalTotal)})`
+          finalPaymentType === 'borc'
+            ? `Nisyə satış qeydə alındı: ${finalDebtorName} (${formatAZN(cartFinalTotal)})`
+            : finalPaymentType === 'qarisik' && (finalSplit?.borc || 0) > 0
+            ? `Qarışıq satış (${formatAZN(cartFinalTotal - (finalSplit?.borc || 0))} ödənildi + ${formatAZN(finalSplit?.borc || 0)} borc) qeydə alındı`
             : `Satış tamamlandı: ${formatAZN(cartFinalTotal)}`;
         showToast('success', msg);
         clearCart();
@@ -650,9 +760,17 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     const q = historySearch.trim().toLowerCase();
     return sales
       .filter(s => {
+        if (!showCancelledSales && s.isCancelled) return false;
         if (effectiveStart && s.date < effectiveStart) return false;
         if (effectiveEnd && s.date > effectiveEnd) return false;
-        if (filterPaymentType !== 'all' && s.paymentType !== filterPaymentType) return false;
+        if (filterPaymentType !== 'all') {
+          if (filterPaymentType === 'qarisik') {
+            if (s.paymentType !== 'qarisik') return false;
+          } else {
+            const split = resolveSalePaymentSplit(s);
+            if ((split[filterPaymentType] || 0) <= 0.009) return false;
+          }
+        }
         if (
           filterProductId !== 'all' &&
           !s.items.some(i => i.productId === filterProductId)
@@ -675,7 +793,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
         if (cmpTime !== 0) return cmpTime;
         return (b.createdAt || '').localeCompare(a.createdAt || '');
       });
-  }, [sales, effectiveStart, effectiveEnd, filterPaymentType, filterProductId, historySearch]);
+  }, [sales, showCancelledSales, effectiveStart, effectiveEnd, filterPaymentType, filterProductId, historySearch]);
 
   const filteredMetrics = useMemo(
     () =>
@@ -692,15 +810,20 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     [filteredHistorySales, debts, purchases, expenses, customerAccounts, effectiveStart, effectiveEnd]
   );
 
+  const activeFilteredSales = useMemo(
+    () => filteredHistorySales.filter(s => !s.isCancelled),
+    [filteredHistorySales]
+  );
+
   const dayConfirmed =
     isSingleDay &&
-    filteredHistorySales.length > 0 &&
-    filteredHistorySales.every(s => s.isConfirmed);
+    activeFilteredSales.length > 0 &&
+    activeFilteredSales.every(s => s.isConfirmed);
 
-  // Filtered product breakdown
+  // Filtered product breakdown (excludes cancelled sales)
   const filteredProductStats = useMemo(() => {
     const stats: Record<string, { name: string; quantity: number; revenue: number }> = {};
-    for (const s of filteredHistorySales) {
+    for (const s of activeFilteredSales) {
       for (const item of s.items) {
         if (filterProductId !== 'all' && item.productId !== filterProductId) continue;
         if (!stats[item.productId]) {
@@ -711,10 +834,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
       }
     }
     return Object.values(stats).sort((a, b) => b.revenue - a.revenue);
-  }, [filteredHistorySales, filterProductId]);
+  }, [activeFilteredSales, filterProductId]);
 
-  // Monthly Sales Summary calculations
-  const monthSalesList = sales.filter(s => s.date.startsWith(selectedMonth));
+  // Monthly Sales Summary calculations (excludes cancelled sales)
+  const monthSalesList = sales.filter(s => !s.isCancelled && s.date.startsWith(selectedMonth));
   const monthTotalAmount = monthSalesList.reduce((sum, s) => sum + s.totalAmount, 0);
   const monthlyProductStats: Record<string, { name: string; quantity: number; revenue: number }> = {};
   for (const s of monthSalesList) {
@@ -728,6 +851,13 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
   }
 
   const getPaymentBadge = (sale: Sale) => {
+    if (sale.isCancelled) {
+      return {
+        label: 'Ləğv edilib',
+        status: sale.cancelReason || 'Dövriyyədən çıxarılıb',
+        cls: 'text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-950/60 border-red-300 dark:border-red-800',
+      };
+    }
     switch (sale.paymentType) {
       case 'naqd':
         return { label: 'Nağd', status: sale.isConfirmed ? 'Ödənildi' : 'Gözləyir', cls: 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-900' };
@@ -736,11 +866,25 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
       case 'pos':
         return { label: 'POS Terminal', status: sale.isConfirmed ? 'Ödənildi' : 'Gözləyir', cls: 'text-indigo-700 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/60 border-indigo-200 dark:border-indigo-900' };
       case 'balans':
-        return { label: 'Depozit Balans', status: 'Balansdan', cls: 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-900' };
+        return { label: 'Müştəri Balansı', status: 'Balansdan', cls: 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-900' };
       case 'borc': {
-        const linked = debts.find(d => d.saleId === sale.id);
+        const linked = debts.find(d => !d.isCancelled && d.saleId === sale.id);
         const statusText = linked?.status === 'odanilib' ? 'Ödənilib' : linked?.status === 'qismen' ? 'Qismən ödənilib' : 'Nisyə (Borc)';
         return { label: 'Nisyə', status: statusText, cls: 'text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-900' };
+      }
+      case 'qarisik': {
+        const splitLabel = formatSalePaymentLabel(sale);
+        const linked = debts.find(d => !d.isCancelled && d.saleId === sale.id);
+        const statusText = linked
+          ? linked.status === 'odanilib'
+            ? 'Borc bağlanıb'
+            : `Qalıq borc: ${formatAZN(linked.remainingAmount)}`
+          : 'Qarışıq ödəniş';
+        return {
+          label: splitLabel,
+          status: statusText,
+          cls: 'text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 border-purple-200 dark:border-purple-900',
+        };
       }
     }
   };
@@ -777,6 +921,18 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
     const res = updateSaleDate(editingSale.id, editDateValue, editTimeValue);
     if (res.success) {
       setEditingSale(null);
+    } else if (res.error) {
+      showToast('error', res.error);
+    }
+  };
+
+  const handleConfirmCancelSale = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cancellingSale) return;
+    const res = cancelSale(cancellingSale.id, cancelReasonInput.trim() || undefined);
+    if (res.success) {
+      setCancellingSale(null);
+      setCancelReasonInput('');
     } else if (res.error) {
       showToast('error', res.error);
     }
@@ -1356,7 +1512,15 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                     </span>
                     <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                       {paymentType === 'borc'
-                        ? 'Kassaya əlavə olunmur (Nisyə)'
+                        ? upfrontPaidNum > 0
+                          ? `${formatAZN(upfrontPaidNum)} indi · ${formatAZN(borcRemainingNum)} borc`
+                          : 'Kassaya əlavə olunmur (Tam Nisyə)'
+                        : paymentType === 'qarisik'
+                        ? Math.abs(mixRemainingDelta) <= 0.01
+                          ? 'Bölgü tamamlandı'
+                          : `Qalıq bölgü: ${formatAZN(mixRemainingDelta)}`
+                        : paymentType === 'balans'
+                        ? 'Balansdan çıxılır · Kassa dəyişmir'
                         : settings.autoConfirmSales
                         ? 'Avtomatik təsdiq aktivdir'
                         : 'Gün sonunda təsdiqlənəcək'}
@@ -1368,7 +1532,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                 </div>
               </div>
 
-              {/* Payment Method Selector */}
+              {/* Payment Method Selector (6 modes) */}
               <div className="space-y-2">
                 <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
                   Ödəniş Növü
@@ -1397,7 +1561,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                     }`}
                   >
                     <CreditCard className="w-4 h-4 shrink-0" />
-                    <span>Bank Kartı</span>
+                    <span>Kart</span>
                   </button>
 
                   <button
@@ -1410,7 +1574,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                     }`}
                   >
                     <Smartphone className="w-4 h-4 shrink-0" />
-                    <span>POS Terminal</span>
+                    <span>POS</span>
                   </button>
 
                   <button
@@ -1429,14 +1593,27 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   <button
                     type="button"
                     onClick={() => setPaymentType('borc')}
-                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap col-span-2 sm:col-span-2 ${
+                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
                       paymentType === 'borc'
                         ? 'bg-rose-700 text-white border-rose-600'
                         : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
                     }`}
                   >
                     <BookOpen className="w-4 h-4 shrink-0" />
-                    <span>Nisyə (Borc Yaz)</span>
+                    <span>Nisyə (Borc)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPaymentType('qarisik')}
+                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+                      paymentType === 'qarisik'
+                        ? 'bg-purple-700 text-white border-purple-600'
+                        : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    }`}
+                  >
+                    <Layers className="w-4 h-4 shrink-0" />
+                    <span>Qarışıq</span>
                   </button>
                 </div>
               </div>
@@ -1499,7 +1676,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                 </div>
               )}
 
-              {/* BORC (Nisyə) Name & Phone Inputs */}
+              {/* BORC (Nisyə) Name, Phone & Partial Upfront Payment */}
               {paymentType === 'borc' && (
                 <div className="space-y-2.5 p-3.5 rounded-xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/80">
                   <div className="flex items-center justify-between">
@@ -1549,6 +1726,149 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                       />
                     </div>
                   </div>
+
+                  {/* Partial upfront payment (e.g., 10 AZN sale -> 4 AZN upfront -> 6 AZN debt) */}
+                  <div className="pt-2 border-t border-rose-200 dark:border-rose-800/60 space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                        Öndən ödənilən məbləğ (AZN)
+                      </label>
+                      <select
+                        value={borcUpfrontMethod}
+                        onChange={e => setBorcUpfrontMethod(e.target.value as 'naqd' | 'kart' | 'pos')}
+                        aria-label="İlkin ödəniş üsulu"
+                        className="px-2 py-1 text-[11px] font-bold rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                      >
+                        <option value="naqd">Nağd</option>
+                        <option value="kart">Kart</option>
+                        <option value="pos">POS</option>
+                      </select>
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      max={cartFinalTotal || undefined}
+                      value={borcUpfrontPaid}
+                      onChange={e => setBorcUpfrontPaid(e.target.value)}
+                      placeholder="0.00 (tam nisyə üçün boş saxlayın)"
+                      className="w-full px-3 py-1.5 text-sm font-mono tabular-nums rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    />
+                    <div className="flex items-center justify-between text-[11px] font-mono tabular-nums">
+                      <span className="text-zinc-500 font-sans">Kassaya daxil olan:</span>
+                      <strong className="text-emerald-600 dark:text-emerald-400">{formatAZN(upfrontPaidNum)}</strong>
+                    </div>
+                    <div className="flex items-center justify-between text-[11px] font-mono tabular-nums">
+                      <span className="text-zinc-500 font-sans">Yaranacaq qalıq borc:</span>
+                      <strong className="text-rose-700 dark:text-rose-400">{formatAZN(borcRemainingNum)}</strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* QARISIQQ (Mixed Payment Split) */}
+              {paymentType === 'qarisik' && (
+                <div className="space-y-2.5 p-3.5 rounded-xl bg-purple-50/60 dark:bg-purple-950/25 border border-purple-200 dark:border-purple-800/70">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-purple-800 dark:text-purple-300 uppercase tracking-wider">
+                      Qarışıq Ödəniş Bölgüsü
+                    </span>
+                    <span
+                      className={`text-[11px] font-mono tabular-nums font-bold ${
+                        Math.abs(mixRemainingDelta) <= 0.01
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-amber-600 dark:text-amber-400'
+                      }`}
+                    >
+                      {Math.abs(mixRemainingDelta) <= 0.01
+                        ? 'Tam uyğundur'
+                        : `Qalıq: ${formatAZN(mixRemainingDelta)}`}
+                    </span>
+                  </div>
+
+                  {(
+                    [
+                      { key: 'naqd', label: 'Nağd', val: mixNaqd, setter: setMixNaqd },
+                      { key: 'kart', label: 'Kart', val: mixKart, setter: setMixKart },
+                      { key: 'pos', label: 'POS', val: mixPos, setter: setMixPos },
+                      { key: 'balans', label: 'Balans', val: mixBalans, setter: setMixBalans },
+                      { key: 'borc', label: 'Borc', val: mixBorc, setter: setMixBorc },
+                    ] as const
+                  ).map(ch => (
+                    <div key={ch.key} className="flex items-center gap-2">
+                      <span className="w-14 text-xs font-bold text-zinc-700 dark:text-zinc-300 shrink-0">
+                        {ch.label}
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={ch.val}
+                        onChange={e => ch.setter(e.target.value)}
+                        placeholder="0.00"
+                        aria-label={`Qarışıq ${ch.label}`}
+                        className="flex-1 px-2.5 py-1.5 text-xs font-mono tabular-nums rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                      />
+                      {mixRemainingDelta > 0.009 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const currentVal = round2(parseFloat(ch.val) || 0);
+                            ch.setter(round2(currentVal + mixRemainingDelta).toFixed(2));
+                          }}
+                          className="px-2 py-1 text-[10px] font-mono font-bold rounded-lg bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 whitespace-nowrap"
+                          title="Qalan məbləği bu kanala əlavə et"
+                        >
+                          +{mixRemainingDelta.toFixed(2)}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+
+                  {mixSplitValues.balans > 0.009 && (
+                    <div className="pt-1.5 border-t border-purple-200 dark:border-purple-800/60">
+                      <label className="block text-[11px] font-semibold text-amber-700 dark:text-amber-300 mb-1">
+                        Balansdan çıxılacaq müştəri *
+                      </label>
+                      <select
+                        value={selectedCustomerAccount}
+                        onChange={e => setSelectedCustomerAccount(e.target.value)}
+                        className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white font-semibold"
+                      >
+                        <option value="">-- Müştəri Hesabı Seçin --</option>
+                        {customerAccounts.map(c => (
+                          <option key={c.id} value={c.name}>
+                            {c.name} — Balans: {formatAZN(c.balance)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {mixSplitValues.borc > 0.009 && (
+                    <div className="pt-1.5 border-t border-purple-200 dark:border-purple-800/60 space-y-2">
+                      <input
+                        type="text"
+                        list="known-debtors-list"
+                        value={debtorName}
+                        onChange={e => handleDebtorNameChange(e.target.value)}
+                        placeholder="Borclu adı və soyadı *"
+                        className="w-full px-3 py-1.5 text-xs rounded-lg border border-rose-300 dark:border-rose-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white font-semibold"
+                      />
+                      <datalist id="known-debtors-list">
+                        {knownDebtors.map(k => (
+                          <option key={k.name} value={k.name} />
+                        ))}
+                      </datalist>
+                      <input
+                        type="tel"
+                        value={debtorPhone}
+                        onChange={e => setDebtorPhone(e.target.value)}
+                        placeholder="Telefon (+994 50 ...)"
+                        className="w-full px-3 py-1.5 text-xs font-mono rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1658,10 +1978,21 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                 >
                   Bütün Tarixlər
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCancelledSales(prev => !prev)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors whitespace-nowrap ${
+                    showCancelledSales
+                      ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white'
+                      : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400'
+                  }`}
+                >
+                  {showCancelledSales ? 'Ləğv edilənlər: Açıq' : 'Ləğv edilənləri göstər'}
+                </button>
               </div>
 
               <div className="flex items-center gap-2">
-                {isSingleDay && !dayConfirmed && filteredHistorySales.length > 0 && (
+                {isSingleDay && !dayConfirmed && activeFilteredSales.length > 0 && (
                   <button
                     type="button"
                     onClick={() => confirmDaySales(effectiveStart)}
@@ -1740,6 +2071,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   <option value="pos">POS Terminal</option>
                   <option value="borc">Nisyə (Borc)</option>
                   <option value="balans">Müştəri Balansı</option>
+                  <option value="qarisik">Qarışıq Ödəniş</option>
                 </select>
               </div>
 
@@ -1866,7 +2198,11 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                         return (
                           <tr
                             key={s.id}
-                            className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors"
+                            className={`transition-colors ${
+                              s.isCancelled
+                                ? 'bg-red-50/40 dark:bg-red-950/15 opacity-75'
+                                : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/40'
+                            }`}
                           >
                             <td className="py-3 px-4 whitespace-nowrap align-top">
                               <div className="font-mono tabular-nums font-bold text-zinc-900 dark:text-white">
@@ -1882,6 +2218,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                                   {s.dateChangedAt && s.originalDate && s.originalDate !== s.date
                                     ? `İlk: ${formatDateAZ(s.originalDate)}`
                                     : `Daxil: ${formatDateAZ(entryDateStr)}`}
+                                  {(s.editHistory?.length || 0) > 0 && ` · ${s.editHistory!.length} redaktə`}
                                 </div>
                               )}
                             </td>
@@ -1889,7 +2226,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                             <td className="py-3 px-4 align-top">
                               <div className="space-y-0.5">
                                 {s.items.map((i, idx) => (
-                                  <div key={idx} className="text-zinc-800 dark:text-zinc-200">
+                                  <div
+                                    key={idx}
+                                    className={`text-zinc-800 dark:text-zinc-200 ${s.isCancelled ? 'line-through text-zinc-500' : ''}`}
+                                  >
                                     <span className="font-semibold">{i.productName}</span>{' '}
                                     <span className="font-mono tabular-nums text-zinc-500">
                                       ({i.quantity} × {formatAZN(i.unitPrice)})
@@ -1909,6 +2249,12 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                                   )}
                                 </div>
                               )}
+                              {s.isCancelled && (
+                                <div className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold">
+                                  Ləğv edən: @{s.cancelledBy || 'admin'}
+                                  {s.cancelReason ? ` — "${s.cancelReason}"` : ''}
+                                </div>
+                              )}
                             </td>
 
                             <td className="py-3 px-4 align-top whitespace-nowrap">
@@ -1923,7 +2269,13 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                             </td>
 
                             <td className="py-3 px-4 text-right align-top whitespace-nowrap font-mono tabular-nums">
-                              <div className="font-black text-zinc-900 dark:text-white text-sm">
+                              <div
+                                className={`font-black text-sm ${
+                                  s.isCancelled
+                                    ? 'line-through text-zinc-400 dark:text-zinc-500'
+                                    : 'text-zinc-900 dark:text-white'
+                                }`}
+                              >
                                 {formatAZN(s.totalAmount)}
                               </div>
                               {(s.discountAmount || 0) > 0 && (
@@ -1934,58 +2286,46 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                             </td>
 
                             <td className="py-3 px-4 text-right align-top whitespace-nowrap">
-                              <div className="flex items-center justify-end gap-1.5">
-                                {!s.isConfirmed && (
-                                  <button
-                                    type="button"
-                                    onClick={() => confirmSale(s.id)}
-                                    title="Satışı Təsdiqlə"
-                                    className="px-2 py-1 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-md"
-                                  >
-                                    Təsdiqlə
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => openEditSaleDateModal(s)}
-                                  title="Tarixi Dəyiş"
-                                  className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                                >
-                                  <Edit3 className="w-3.5 h-3.5" />
-                                </button>
-                                {isAdmin && (
-                                  confirmDeleteSaleId === s.id ? (
-                                    <div className="flex items-center gap-1">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          deleteSale(s.id);
-                                          setConfirmDeleteSaleId(null);
-                                        }}
-                                        className="px-2 py-1 text-[10px] font-bold bg-red-600 text-white rounded-md"
-                                      >
-                                        Təsdiq
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => setConfirmDeleteSaleId(null)}
-                                        className="px-2 py-1 text-[10px] font-semibold bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-200 rounded-md"
-                                      >
-                                        X
-                                      </button>
-                                    </div>
-                                  ) : (
+                              {!s.isCancelled ? (
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {!s.isConfirmed && (
                                     <button
                                       type="button"
-                                      onClick={() => setConfirmDeleteSaleId(s.id)}
-                                      title="Satışı ləğv et (Stok bərpa edilər)"
-                                      className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:text-red-500 transition-colors"
+                                      onClick={() => confirmSale(s.id)}
+                                      title="Satışı Təsdiqlə"
+                                      className="px-2 py-1 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-md"
                                     >
-                                      <Trash2 className="w-3.5 h-3.5" />
+                                      Təsdiqlə
                                     </button>
-                                  )
-                                )}
-                              </div>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditSaleDateModal(s)}
+                                    title="Tarixi Dəyiş"
+                                    className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                  </button>
+                                  {isAdmin && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setCancellingSale(s);
+                                        setCancelReasonInput('');
+                                      }}
+                                      title="Satışı ləğv et (Tarixçədə saxlanılır, stok və balans bərpa olunur)"
+                                      className="px-2 py-1 rounded-lg border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 text-[10px] font-bold inline-flex items-center gap-1 transition-colors"
+                                    >
+                                      <Ban className="w-3 h-3" />
+                                      <span>Ləğv Et</span>
+                                    </button>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-[10px] font-mono text-zinc-400">
+                                  Arxiv · Ləğv
+                                </span>
+                              )}
                             </td>
                           </tr>
                         );
@@ -2313,6 +2653,82 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl"
                 >
                   Balansı Artır
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Sale Confirmation Modal (Non-destructive Audit) */}
+      {cancellingSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+          <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+            <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Ban className="w-5 h-5 text-red-500" />
+                <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                  Satışı Ləğv Et
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCancellingSale(null)}
+                className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmCancelSale} className="p-5 space-y-4">
+              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Tarix / Saat:</span>
+                  <strong className="font-mono tabular-nums text-zinc-900 dark:text-white">
+                    {formatDateAZ(cancellingSale.date)} ({cancellingSale.time})
+                  </strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Məbləğ:</span>
+                  <strong className="font-mono tabular-nums text-zinc-900 dark:text-white">
+                    {formatAZN(cancellingSale.totalAmount)} ({formatSalePaymentLabel(cancellingSale)})
+                  </strong>
+                </div>
+                <div className="text-zinc-600 dark:text-zinc-400 pt-1">
+                  {cancellingSale.items.map(i => `${i.productName} ×${i.quantity}`).join(', ')}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
+                  Ləğv etmə səbəbi
+                </label>
+                <input
+                  type="text"
+                  value={cancelReasonInput}
+                  onChange={e => setCancelReasonInput(e.target.value)}
+                  placeholder="məs: Səhv məhsul vurulub"
+                  className="w-full px-3 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                />
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 text-[11px] text-amber-800 dark:text-amber-300">
+                Satış silinməyəcək — tarixçədə «Ləğv edilib» statusu ilə qalacaq, anbar stoku, müştəri balansı və bağlı borc avtomatik geri qaytarılacaq.
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setCancellingSale(null)}
+                  className="px-4 py-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400"
+                >
+                  İmtina
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl"
+                >
+                  Satışı Ləğv Et
                 </button>
               </div>
             </form>

@@ -15,6 +15,8 @@ import {
   calculateFinancialMetricsForRange,
   extractBalanceProductWithdrawals,
   extractBalanceCashWithdrawals,
+  calculateProductBreakdownByPaymentMethod,
+  calculateDailyStaffBreakdown,
 } from './financialCalculations';
 import {
   normalizeBarcode,
@@ -671,9 +673,183 @@ test('Customer balance integration: open/deposit excluded from sales, product_ou
   assert.equal(ledger.counts.purchase_in, 1);
   assert.equal(ledger.counts.manual_adjustment, 1);
   const balanceMovement = ledger.movements.find(m => m.movementType === 'balance_product_out');
-  assert.equal(balanceMovement?.sourceLabel, 'Müştəri balansından çıxarış');
+  assert.equal(balanceMovement?.sourceLabel, 'Müştəri balansından məhsul çıxarışı');
   assert.equal(balanceMovement?.quantityDelta, -2);
 });
+
+test('Mixed payment (5 AZN naqd + 5 AZN kart) and partial upfront credit (10 AZN sale: 4 naqd + 6 borc) reconcile with zero double counting', () => {
+  const sales: Sale[] = [
+    {
+      id: 'mix-1',
+      date: '2026-11-16',
+      time: '10:00',
+      items: [{ productId: 'p1', productName: 'Shake', quantity: 2, unitPrice: 5, totalPrice: 10 }],
+      totalAmount: 10,
+      paymentType: 'qarisik',
+      paymentSplit: { naqd: 5, kart: 5 },
+      isConfirmed: true,
+      createdAt: '2026-11-16T10:00:00Z',
+      createdBy: 'isci',
+    },
+    {
+      id: 'partial-borc-1',
+      date: '2026-11-16',
+      time: '11:30',
+      items: [{ productId: 'p2', productName: 'BCAA', quantity: 1, unitPrice: 10, totalPrice: 10 }],
+      totalAmount: 10,
+      paymentType: 'qarisik',
+      paymentSplit: { naqd: 4, borc: 6 },
+      debtorName: 'Əli',
+      isConfirmed: true,
+      createdAt: '2026-11-16T11:30:00Z',
+      createdBy: 'isci',
+    },
+  ];
+
+  const debts: DebtRecord[] = [
+    {
+      id: 'debt-partial-1',
+      saleId: 'partial-borc-1',
+      debtorName: 'Əli',
+      items: [{ productName: 'BCAA', quantity: 1, unitPrice: 10 }],
+      totalAmount: 10,
+      paidAmount: 10,
+      remainingAmount: 0,
+      date: '2026-11-16',
+      status: 'odanilib',
+      payments: [
+        {
+          id: 'p-upfront',
+          debtId: 'debt-partial-1',
+          date: '2026-11-16',
+          paidAt: '2026-11-16',
+          amount: 4,
+          paymentMethod: 'naqd',
+          receivedBy: 'isci',
+          isUpfront: true,
+          createdAt: '2026-11-16T11:30:00Z',
+        },
+        {
+          id: 'p-later',
+          debtId: 'debt-partial-1',
+          date: '2026-11-17',
+          paidAt: '2026-11-17',
+          amount: 6,
+          paymentMethod: 'kart',
+          receivedBy: 'admin',
+          isUpfront: false,
+          createdAt: '2026-11-17T09:00:00Z',
+        },
+      ],
+      createdAt: '2026-11-16T11:30:00Z',
+      updatedAt: '2026-11-17T09:00:00Z',
+    },
+  ];
+
+  const nov16 = calculateFinancialMetricsForRange({
+    sales,
+    debts,
+    startDate: '2026-11-16',
+    endDate: '2026-11-16',
+  });
+
+  // Total sales = 10 + 10 = 20; Cash = 5 + 4 = 9; Card = 5; Credit = 6; Upfront 4 NOT double-counted in debtCollected
+  assert.equal(nov16.grossSalesTotal, 20);
+  assert.equal(nov16.cashSales, 9);
+  assert.equal(nov16.cardSales, 5);
+  assert.equal(nov16.creditSales, 6);
+  assert.equal(nov16.debtCollectedTotal, 0);
+  assert.equal(nov16.actualDrawerInflow, 14); // 9 naqd + 5 kart
+
+  // Nov 17: 6 AZN debt collected via Kart -> adds 6 to Nov 17 drawer, zero to sales
+  const nov17 = calculateFinancialMetricsForRange({
+    sales,
+    debts,
+    startDate: '2026-11-17',
+    endDate: '2026-11-17',
+  });
+  assert.equal(nov17.grossSalesTotal, 0);
+  assert.equal(nov17.debtCollectedCard, 6);
+  assert.equal(nov17.actualDrawerInflow, 6);
+});
+
+test('Cancelled sales are excluded from metrics, Depo stock, and product breakdown while remaining in history', () => {
+  const product: Product = {
+    id: 'p-su',
+    name: '0.5L Su',
+    barcode: '47600101',
+    salePrice: 1,
+    buyPrice: 0.4,
+    category: 'Su',
+    initialStock: 10,
+    minStockAlert: 2,
+    createdAt: '2026-11-01',
+  };
+
+  const sales: Sale[] = [
+    {
+      id: 's-ok',
+      date: '2026-11-16',
+      time: '12:00',
+      items: [{ productId: 'p-su', productName: '0.5L Su', quantity: 2, unitPrice: 1, totalPrice: 2 }],
+      totalAmount: 2,
+      paymentType: 'naqd',
+      isConfirmed: true,
+      createdAt: '2026-11-16T12:00:00Z',
+      createdBy: 'isci',
+    },
+    {
+      id: 's-cancel',
+      date: '2026-11-16',
+      time: '12:05',
+      items: [{ productId: 'p-su', productName: '0.5L Su', quantity: 5, unitPrice: 1, totalPrice: 5 }],
+      totalAmount: 5,
+      paymentType: 'naqd',
+      isConfirmed: true,
+      isCancelled: true,
+      cancelledAt: '2026-11-16T12:06:00Z',
+      cancelledBy: 'admin',
+      cancelReason: 'Səhv əməliyyat',
+      createdAt: '2026-11-16T12:05:00Z',
+      createdBy: 'isci',
+    },
+  ];
+
+  const stock = calculateProductStock(product, [], sales, 2);
+  assert.equal(stock.activeStock, 8); // 10 - 2 = 8 (5 cancelled restored)
+
+  const metrics = calculateFinancialMetricsForRange({
+    sales,
+    debts: [],
+    startDate: '2026-11-16',
+    endDate: '2026-11-16',
+  });
+  assert.equal(metrics.grossSalesTotal, 2);
+  assert.equal(metrics.actualDrawerInflow, 2);
+  assert.equal(metrics.cancelledSalesCount, 1);
+
+  const prodBreakdown = calculateProductBreakdownByPaymentMethod({
+    sales,
+    startDate: '2026-11-16',
+    endDate: '2026-11-16',
+    paymentMethod: 'naqd',
+  });
+  assert.equal(prodBreakdown.totalQuantity, 2);
+  assert.equal(prodBreakdown.totalAmount, 2);
+  assert.equal(prodBreakdown.items[0].occurrences.length, 1);
+
+  const staffBreakdown = calculateDailyStaffBreakdown({
+    sales,
+    debts: [],
+    staffDisplayMap: { isci: 'Kassir' },
+    startDate: '2026-11-16',
+    endDate: '2026-11-16',
+  });
+  assert.equal(staffBreakdown.rows[0].grossSales, 2);
+  assert.equal(staffBreakdown.rows[0].soldProducts.length, 1);
+  assert.equal(staffBreakdown.rows[0].soldProducts[0].quantity, 2);
+});
+
 
 
 

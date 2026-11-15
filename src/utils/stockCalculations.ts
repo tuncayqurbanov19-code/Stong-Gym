@@ -27,9 +27,9 @@ export function calculateProductStock(
     .filter(p => p.productId === product.id)
     .reduce((sum, p) => sum + (Number(p.quantity) || 0), 0);
 
-  // Sum total sold quantity for this product from confirmed sales AND credit ('borc') sales immediately
+  // Sum total sold quantity for this product from active (non-cancelled) confirmed sales AND credit ('borc') sales immediately
   const totalSold = sales
-    .filter(s => s.isConfirmed || s.paymentType === 'borc')
+    .filter(s => !s.isCancelled && (s.isConfirmed || s.paymentType === 'borc' || (Number(s.paymentSplit?.borc) || 0) > 0))
     .reduce((sum, s) => {
       const matchingQty = (s.items || [])
         .filter(i => i.productId === product.id)
@@ -97,7 +97,7 @@ export interface DepoLedgerSummary {
 /**
  * Builds unified Depo movement history separated into the 4 authoritative categories:
  * 1. Adi satışdan çıxan məhsullar (`normal_sale_out`)
- * 2. Balansdan çıxan məhsullar (`balance_product_out` — 'Müştəri balansından çıxarış')
+ * 2. Balansdan çıxan məhsullar (`balance_product_out` — 'Müştəri balansından məhsul çıxarışı')
  * 3. Anbara daxil olan məhsullar (`purchase_in`)
  * 4. Əl ilə edilən depo düzəlişləri (`manual_adjustment`)
  */
@@ -120,10 +120,11 @@ export function buildDepoMovementsLedger(params: {
     manual_adjustment: 0,
   };
 
-  // 1 & 2. Outbound movements from confirmed / credit sales
+  // 1 & 2. Outbound movements from non-cancelled confirmed / credit sales
   for (const sale of sales) {
-    if (!sale.isConfirmed && sale.paymentType !== 'borc') continue;
-    const isBalanceOut = sale.paymentType === 'balans';
+    if (sale.isCancelled) continue;
+    if (!sale.isConfirmed && sale.paymentType !== 'borc' && !(Number(sale.paymentSplit?.borc) > 0)) continue;
+    const isBalanceOut = sale.paymentType === 'balans' || (sale.paymentType === 'qarisik' && (Number(sale.paymentSplit?.balans) || 0) >= sale.totalAmount && sale.totalAmount > 0);
 
     (sale.items || []).forEach((item, idx) => {
       const qty = Math.abs(Number(item.quantity) || 0);
@@ -151,10 +152,12 @@ export function buildDepoMovementsLedger(params: {
         date: sale.date,
         time: sale.time || '00:00',
         sourceLabel: isBalanceOut
-          ? 'Müştəri balansından çıxarış'
+          ? 'Müştəri balansından məhsul çıxarışı'
+          : sale.paymentType === 'qarisik'
+          ? 'Qarışıq satış'
           : `Adi satış (${sale.paymentType.toUpperCase()})`,
         note: isBalanceOut
-          ? `${sale.debtorName ? `${sale.debtorName} · ` : ''}Müştəri balansından çıxarış`
+          ? `${sale.debtorName ? `${sale.debtorName} · ` : ''}Müştəri balansından məhsul çıxarışı`
           : sale.debtorName
           ? `Müştəri: ${sale.debtorName}`
           : undefined,

@@ -1,4 +1,4 @@
-import { CustomerAccount, DailyReport, DebtRecord, Expense, Product, PurchaseIntake, Sale } from '../types';
+import { CustomerAccount, DailyReport, DebtRecord, Expense, PaymentType, Product, PurchaseIntake, Sale } from '../types';
 
 export interface PaymentBreakdown {
   cash: number;
@@ -7,6 +7,79 @@ export interface PaymentBreakdown {
   debt: number;
   balance: number;
   total: number;
+}
+
+export interface ResolvedSaleSplit {
+  naqd: number;
+  kart: number;
+  pos: number;
+  balans: number;
+  borc: number;
+}
+
+const round2 = (v: number) => Math.round((Number(v) || 0) * 100) / 100;
+
+/**
+ * Resolves a sale's amount across the 5 financial channels (naqd, kart, pos, balans, borc),
+ * handling legacy single-method sales, mixed ('qarisik') sales, and partial upfront credit sales.
+ */
+export function resolveSalePaymentSplit(sale: Sale): ResolvedSaleSplit {
+  const amt = round2(sale.totalAmount);
+  if (sale.paymentSplit) {
+    const naqd = round2(sale.paymentSplit.naqd || 0);
+    const kart = round2(sale.paymentSplit.kart || 0);
+    const pos = round2(sale.paymentSplit.pos || 0);
+    const balans = round2(sale.paymentSplit.balans || 0);
+    const borc = round2(sale.paymentSplit.borc || 0);
+    if (naqd + kart + pos + balans + borc > 0) {
+      return { naqd, kart, pos, balans, borc };
+    }
+  }
+
+  switch (sale.paymentType) {
+    case 'naqd':
+      return { naqd: amt, kart: 0, pos: 0, balans: 0, borc: 0 };
+    case 'kart':
+      return { naqd: 0, kart: amt, pos: 0, balans: 0, borc: 0 };
+    case 'pos':
+      return { naqd: 0, kart: 0, pos: amt, balans: 0, borc: 0 };
+    case 'balans':
+      return { naqd: 0, kart: 0, pos: 0, balans: amt, borc: 0 };
+    case 'borc':
+      return { naqd: 0, kart: 0, pos: 0, balans: 0, borc: amt };
+    default:
+      return { naqd: amt, kart: 0, pos: 0, balans: 0, borc: 0 };
+  }
+}
+
+export function formatSalePaymentLabel(sale: Sale): string {
+  const split = resolveSalePaymentSplit(sale);
+  const parts: string[] = [];
+  if (split.naqd > 0) parts.push(`${split.naqd.toFixed(2)} ₼ Nağd`);
+  if (split.kart > 0) parts.push(`${split.kart.toFixed(2)} ₼ Kart`);
+  if (split.pos > 0) parts.push(`${split.pos.toFixed(2)} ₼ POS`);
+  if (split.balans > 0) parts.push(`${split.balans.toFixed(2)} ₼ Balans`);
+  if (split.borc > 0) parts.push(`${split.borc.toFixed(2)} ₼ Borc`);
+
+  if (parts.length > 1) {
+    return `Qarışıq (${parts.join(' + ')})`;
+  }
+  switch (sale.paymentType) {
+    case 'naqd':
+      return 'Nağd';
+    case 'kart':
+      return 'Kart';
+    case 'pos':
+      return 'POS / Köçürmə';
+    case 'balans':
+      return 'Müştəri balansı';
+    case 'borc':
+      return 'Nisyə (Borc)';
+    case 'qarisik':
+      return parts.length === 1 ? parts[0] : 'Qarışıq';
+    default:
+      return 'Nağd';
+  }
 }
 
 export interface ProductSaleCount {
@@ -61,7 +134,7 @@ export interface CustomerDebtCheck {
 }
 
 /**
- * Calculates payment breakdown for a list of sales
+ * Calculates payment breakdown for a list of active (non-cancelled) sales
  */
 export function calculatePaymentBreakdown(sales: Sale[]): PaymentBreakdown {
   const result: PaymentBreakdown = {
@@ -74,28 +147,25 @@ export function calculatePaymentBreakdown(sales: Sale[]): PaymentBreakdown {
   };
 
   for (const sale of sales) {
-    const amount = Number(sale.totalAmount) || 0;
+    if (sale.isCancelled) continue;
+    const split = resolveSalePaymentSplit(sale);
+    const amount = round2(sale.totalAmount);
     result.total += amount;
-    switch (sale.paymentType) {
-      case 'naqd':
-        result.cash += amount;
-        break;
-      case 'kart':
-        result.card += amount;
-        break;
-      case 'pos':
-        result.pos += amount;
-        break;
-      case 'borc':
-        result.debt += amount;
-        break;
-      case 'balans':
-        result.balance += amount;
-        break;
-    }
+    result.cash += split.naqd;
+    result.card += split.kart;
+    result.pos += split.pos;
+    result.debt += split.borc;
+    result.balance += split.balans;
   }
 
-  return result;
+  return {
+    cash: round2(result.cash),
+    card: round2(result.card),
+    pos: round2(result.pos),
+    debt: round2(result.debt),
+    balance: round2(result.balance),
+    total: round2(result.total),
+  };
 }
 
 export interface FinancialMetricsSummary {
@@ -144,19 +214,20 @@ export interface FinancialMetricsSummary {
   totalCashOutflow: number;     // Cəmi çıxan pul (purchases + expenses + balanceCashWithdrawals)
   netCashBalance: number;       // Kassanın faktiki xalis balansı (actualDrawerInflow - totalCashOutflow)
 
-  // Ümumi sistem üzrə ödənilməmiş borclar
+  // Ümumi sistem üzrə ödənilməmiş borclar & ləğv olunmuş satış sayı
   totalUnpaidDebts: number;     // Hal-hazırda ödənilməmiş borcların ümumi qalıq məbləği
+  cancelledSalesCount: number;  // Dövrdə ləğv olunmuş satış sayı (tarixçədə qorunur, cəmə daxil edilmir)
 }
 
 /**
  * Authoritative financial calculation shared across POS, Daily Report, and Dashboard.
  * Rules:
- * 1. Gross sales include all confirmed sales, balance product withdrawals ('balans'), & credit ('borc') sales as revenue.
+ * 1. Gross sales include all confirmed non-cancelled sales, balance product withdrawals ('balans'), credit ('borc'), & mixed ('qarisik').
  * 2. Initial balance openings/top-ups ('open', 'deposit') and free cash withdrawals ('withdraw') are NEVER counted as sales revenue.
  * 3. Free cash withdrawals from balance ('withdraw') subtract from Net Cash Balance (`totalCashOutflow` & `netCashBalance`) cleanly.
- * 4. Credit sales ('borc') NEVER enter actual cash drawer inflow when created.
- * 5. Debt collections enter actual cash drawer inflow on the exact `paidAt` date, separated cleanly as `debtCollectedTotal`.
- * 6. Net cash balance = actualDrawerInflow - (purchases + expenses + balanceCashWithdrawals).
+ * 4. Credit portions ('borc') NEVER enter actual cash drawer inflow when created; upfront partial portions (`naqd`/`kart`/`pos`) DO enter drawer once.
+ * 5. Subsequent debt collections (`!p.isUpfront`) enter actual cash drawer inflow on `paidAt` date without double-counting sales revenue.
+ * 6. Cancelled sales and cancelled debts are excluded from financial totals while kept in audit history.
  */
 export function calculateFinancialMetricsForRange(params: {
   sales: Sale[];
@@ -179,15 +250,19 @@ export function calculateFinancialMetricsForRange(params: {
     includeUnconfirmedSales = false,
   } = params;
 
+  const cancelledSalesCount = sales.filter(
+    s => s.isCancelled && s.date >= startDate && s.date <= endDate
+  ).length;
+
   const filteredSales = sales.filter(
     s =>
+      !s.isCancelled &&
       s.date >= startDate &&
       s.date <= endDate &&
-      (includeUnconfirmedSales || s.isConfirmed || s.paymentType === 'borc')
+      (includeUnconfirmedSales || s.isConfirmed || s.paymentType === 'borc' || (Number(s.paymentSplit?.borc) || 0) > 0)
   );
 
   const breakdown = calculatePaymentBreakdown(filteredSales);
-  const round2 = (v: number) => Math.round(v * 100) / 100;
 
   let totalDiscounts = 0;
   let totalItemsSold = 0;
@@ -196,9 +271,11 @@ export function calculateFinancialMetricsForRange(params: {
 
   for (const s of filteredSales) {
     totalDiscounts += Number(s.discountAmount) || 0;
-    if (s.paymentType === 'balans') {
+    const split = resolveSalePaymentSplit(s);
+    if (split.balans > 0) {
       balanceProductOutCount += 1;
-    } else {
+    }
+    if (split.naqd + split.kart + split.pos + split.borc > 0) {
       normalSalesCount += 1;
     }
     for (const item of s.items || []) {
@@ -216,7 +293,9 @@ export function calculateFinancialMetricsForRange(params: {
   let debtCollectedCount = 0;
 
   for (const debt of debts) {
+    if (debt.isCancelled) continue;
     for (const p of debt.payments || []) {
+      if (p.isUpfront) continue; // Satış zamanı öndən ödənilən hissə artıq satış daxilolmasında hesablanıb
       const paidDate = (p.paidAt || p.date || '').split('T')[0];
       if (!paidDate || paidDate < startDate || paidDate > endDate) continue;
 
@@ -283,7 +362,7 @@ export function calculateFinancialMetricsForRange(params: {
 
   const totalUnpaidDebts = round2(
     debts
-      .filter(d => (d.status === 'borcdadir' || d.status === 'qismen') && Number(d.remainingAmount) > 0)
+      .filter(d => !d.isCancelled && (d.status === 'borcdadir' || d.status === 'qismen') && Number(d.remainingAmount) > 0)
       .reduce((sum, d) => sum + (Number(d.remainingAmount) || 0), 0)
   );
 
@@ -324,6 +403,7 @@ export function calculateFinancialMetricsForRange(params: {
     totalCashOutflow,
     netCashBalance,
     totalUnpaidDebts,
+    cancelledSalesCount,
   };
 }
 
@@ -363,20 +443,32 @@ export function extractBalanceProductWithdrawals(
 ): BalanceProductWithdrawalItem[] {
   const result: BalanceProductWithdrawalItem[] = [];
   for (const s of sales) {
-    if (s.paymentType !== 'balans') continue;
-    if (!s.isConfirmed) continue;
+    if (s.isCancelled || !s.isConfirmed) continue;
     if (s.date < startDate || s.date > endDate) continue;
+    const split = resolveSalePaymentSplit(s);
+    if (split.balans <= 0) continue;
+
+    const ratio = s.totalAmount > 0 ? split.balans / s.totalAmount : 0;
+    const subtotal = (s.items || []).reduce((acc, i) => acc + (Number(i.totalPrice) || 0), 0);
 
     (s.items || []).forEach((item, idx) => {
+      const rawTotal = Number(item.totalPrice) || 0;
+      const itemAmount =
+        ratio >= 0.9999
+          ? rawTotal
+          : subtotal > 0
+          ? round2((rawTotal / subtotal) * split.balans)
+          : round2(split.balans);
+      const qty = Number(item.quantity) || 0;
       result.push({
         id: `${s.id}-item-${idx}`,
         saleId: s.id,
         customerName: s.debtorName || 'Müştəri',
         productId: item.productId,
         productName: item.productName,
-        quantity: Number(item.quantity) || 0,
+        quantity: ratio >= 0.9999 ? qty : round2(qty * ratio),
         unitPrice: Number(item.unitPrice) || 0,
-        totalAmount: Number(item.totalPrice) || 0,
+        totalAmount: itemAmount,
         date: s.date,
         time: s.time || '00:00',
         createdBy: s.createdBy || 'isci',
@@ -462,7 +554,7 @@ export function calculateCategoryBreakdown(
   > = {};
 
   for (const sale of sales) {
-    if (!sale.isConfirmed) continue;
+    if (sale.isCancelled || !sale.isConfirmed) continue;
     for (const item of sale.items) {
       const prod = prodMap.get(item.productId);
       const category = (prod?.category?.trim() || 'Digər');
@@ -540,6 +632,7 @@ export function calculateProductSaleCounts(sales: Sale[]): ProductSaleCount[] {
   const map: Record<string, ProductSaleCount> = {};
 
   for (const sale of sales) {
+    if (sale.isCancelled || !sale.isConfirmed) continue;
     for (const item of sale.items) {
       if (!map[item.productId]) {
         map[item.productId] = {
@@ -601,13 +694,15 @@ export function checkDailyReportDiscrepancy(
   debtPaymentsForDay: DebtRecord['payments'] = []
 ): DiscrepancyResult {
   const salesTotal = salesForDay
-    .filter(s => s.isConfirmed && s.paymentType !== 'borc' && s.paymentType !== 'balans')
-    .reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+    .filter(s => !s.isCancelled && s.isConfirmed)
+    .reduce((sum, s) => {
+      const split = resolveSalePaymentSplit(s);
+      return sum + split.naqd + split.kart + split.pos;
+    }, 0);
 
-  const debtCollectedTotal = debtPaymentsForDay.reduce(
-    (sum, p) => sum + (Number(p.amount) || 0),
-    0
-  );
+  const debtCollectedTotal = debtPaymentsForDay
+    .filter(p => !p.isUpfront)
+    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
   const expectedDrawerTotal = Math.round((salesTotal + debtCollectedTotal) * 100) / 100;
   const reportTotal = dailyReport ? Number(dailyReport.totalAmount) || 0 : 0;
@@ -648,6 +743,7 @@ export function checkCustomerDebt(
   }
 
   const customerDebts = debts.filter(d => {
+    if (d.isCancelled) return false;
     if ((d.status !== 'borcdadir' && d.status !== 'qismen') || Number(d.remainingAmount) <= 0) {
       return false;
     }
@@ -694,18 +790,19 @@ export function calculateDebtOverview(debts: DebtRecord[]): {
   totalPaidDebt: number;
   partialCount: number;
 } {
-  const unpaidDebts = debts.filter(
+  const activeDebts = debts.filter(d => !d.isCancelled);
+  const unpaidDebts = activeDebts.filter(
     d => (d.status === 'borcdadir' || d.status === 'qismen') && Number(d.remainingAmount) > 0
   );
 
-  const partialCount = debts.filter(d => d.status === 'qismen').length;
+  const partialCount = activeDebts.filter(d => d.status === 'qismen').length;
 
   const totalRemainingDebt = unpaidDebts.reduce(
     (sum, d) => sum + (Number(d.remainingAmount) || 0),
     0
   );
 
-  const totalPaidDebt = debts.reduce(
+  const totalPaidDebt = activeDebts.reduce(
     (sum, d) => sum + (Number(d.paidAmount) || 0),
     0
   );
@@ -714,7 +811,7 @@ export function calculateDebtOverview(debts: DebtRecord[]): {
     unpaidDebts.map(d => d.debtorName.trim().toLowerCase())
   );
   const allUnique = new Set(
-    debts.map(d => d.debtorName.trim().toLowerCase())
+    activeDebts.map(d => d.debtorName.trim().toLowerCase())
   );
 
   return {
@@ -727,17 +824,188 @@ export function calculateDebtOverview(debts: DebtRecord[]): {
   };
 }
 
+export interface ProductMethodSaleOccurrence {
+  saleId: string;
+  date: string;
+  time: string;
+  quantity: number;
+  rawQuantity: number;
+  unitPrice: number;
+  amount: number;
+  customerName?: string;
+  staffUsername: string;
+  staffName: string;
+  paymentType: PaymentType;
+  isMixed: boolean;
+  paymentLabel: string;
+}
+
+export interface ProductMethodBreakdownItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  salesCount: number;
+  occurrences: ProductMethodSaleOccurrence[];
+}
+
+export interface ProductMethodBreakdownSummary {
+  paymentMethod: 'all' | 'naqd' | 'kart' | 'pos' | 'borc' | 'balans';
+  totalAmount: number;
+  totalQuantity: number;
+  items: ProductMethodBreakdownItem[];
+}
+
+/**
+ * Per-payment-method product sales report (e.g. Nağd: Su 5 ədəd 5 AZN, Kofe 3 ədəd 9 AZN)
+ * with full drilldown occurrences (time, quantity, customer, staff).
+ */
+export function calculateProductBreakdownByPaymentMethod(params: {
+  sales: Sale[];
+  staffDisplayMap?: Record<string, string>;
+  paymentMethod: 'all' | 'naqd' | 'kart' | 'pos' | 'borc' | 'balans';
+  startDate: string;
+  endDate: string;
+  productSearch?: string;
+  customerSearch?: string;
+}): ProductMethodBreakdownSummary {
+  const {
+    sales,
+    staffDisplayMap = {},
+    paymentMethod,
+    startDate,
+    endDate,
+    productSearch = '',
+    customerSearch = '',
+  } = params;
+
+  const prodQuery = productSearch.trim().toLowerCase();
+  const custQuery = customerSearch.trim().toLowerCase();
+  const productMap: Record<string, ProductMethodBreakdownItem> = {};
+
+  let totalAmount = 0;
+  let totalQuantity = 0;
+
+  for (const s of sales) {
+    if (s.isCancelled) continue;
+    if (!s.isConfirmed && s.paymentType !== 'borc' && !(Number(s.paymentSplit?.borc) > 0)) continue;
+    if (s.date < startDate || s.date > endDate) continue;
+
+    if (custQuery && !(s.debtorName || '').toLowerCase().includes(custQuery)) {
+      continue;
+    }
+
+    const split = resolveSalePaymentSplit(s);
+    const channelAmount =
+      paymentMethod === 'all' ? round2(s.totalAmount) : round2(split[paymentMethod] || 0);
+    if (channelAmount <= 0) continue;
+
+    const saleTotal = round2(s.totalAmount);
+    const ratio = saleTotal > 0 ? channelAmount / saleTotal : 0;
+    const isMixed =
+      s.paymentType === 'qarisik' ||
+      [split.naqd, split.kart, split.pos, split.balans, split.borc].filter(v => v > 0).length > 1;
+
+    const itemsSubtotal = (s.items || []).reduce(
+      (sum, item) => sum + (Number(item.totalPrice) || (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0)),
+      0
+    );
+
+    const staffKey = (s.createdBy || 'isci').trim() || 'isci';
+    const staffName = staffDisplayMap[staffKey.toLowerCase()] || staffKey;
+
+    for (const item of s.items || []) {
+      const pName = (item.productName || 'Məhsul').trim();
+      if (prodQuery && !pName.toLowerCase().includes(prodQuery)) continue;
+
+      const rawQty = Number(item.quantity) || 0;
+      const unitPrice = Number(item.unitPrice) || 0;
+      const rawItemTotal = Number(item.totalPrice) || round2(rawQty * unitPrice);
+      const itemAmount =
+        ratio >= 0.9999 && itemsSubtotal > 0 && Math.abs(itemsSubtotal - saleTotal) < 0.01
+          ? round2(rawItemTotal)
+          : itemsSubtotal > 0
+          ? round2((rawItemTotal / itemsSubtotal) * channelAmount)
+          : round2(channelAmount);
+
+      const allocQty = ratio >= 0.9999 ? rawQty : round2(rawQty * ratio);
+      const key = item.productId || pName.toLowerCase();
+
+      if (!productMap[key]) {
+        productMap[key] = {
+          productId: item.productId || key,
+          productName: pName,
+          quantity: 0,
+          unitPrice,
+          totalAmount: 0,
+          salesCount: 0,
+          occurrences: [],
+        };
+      }
+
+      productMap[key].quantity = round2(productMap[key].quantity + allocQty);
+      productMap[key].totalAmount = round2(productMap[key].totalAmount + itemAmount);
+      productMap[key].salesCount += 1;
+      productMap[key].occurrences.push({
+        saleId: s.id,
+        date: s.date,
+        time: s.time || '--:--',
+        quantity: allocQty,
+        rawQuantity: rawQty,
+        unitPrice,
+        amount: itemAmount,
+        customerName: s.debtorName,
+        staffUsername: staffKey,
+        staffName,
+        paymentType: s.paymentType,
+        isMixed,
+        paymentLabel: formatSalePaymentLabel(s),
+      });
+
+      totalAmount = round2(totalAmount + itemAmount);
+      totalQuantity = round2(totalQuantity + allocQty);
+    }
+  }
+
+  const items = Object.values(productMap)
+    .map(entry => ({
+      ...entry,
+      unitPrice: entry.quantity > 0 ? round2(entry.totalAmount / entry.quantity) : entry.unitPrice,
+      occurrences: [...entry.occurrences].sort((a, b) => {
+        const d = b.date.localeCompare(a.date);
+        if (d !== 0) return d;
+        return b.time.localeCompare(a.time);
+      }),
+    }))
+    .sort((a, b) => b.totalAmount - a.totalAmount || b.quantity - a.quantity);
+
+  return {
+    paymentMethod,
+    totalAmount,
+    totalQuantity,
+    items,
+  };
+}
+
 export interface StaffOperationItem {
   id: string;
   kind: 'sale' | 'debt_payment';
   date: string;
   time: string;
   staffUsername: string;
-  paymentMethod: 'naqd' | 'kart' | 'pos' | 'balans' | 'borc';
+  paymentMethod: 'naqd' | 'kart' | 'pos' | 'balans' | 'borc' | 'qarisik';
   amount: number;
   description: string;
   customerOrNote?: string;
   badgeText?: string;
+}
+
+export interface StaffSoldProductItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  totalAmount: number;
 }
 
 export interface StaffPaymentRow {
@@ -748,12 +1016,14 @@ export interface StaffPaymentRow {
   pos: number;
   balans: number;
   nisye: number;
+  grossSales: number;
   salesCount: number;
   debtPaymentsCount: number;
   avgCheck: number;
   salesInflow: number;
   debtInflow: number;
   totalInflow: number;
+  soldProducts: StaffSoldProductItem[];
   operations: StaffOperationItem[];
 }
 
@@ -765,6 +1035,7 @@ export interface DailyStaffBreakdownSummary {
     pos: number;
     balans: number;
     nisye: number;
+    grossSales: number;
     salesCount: number;
     debtPaymentsCount: number;
     avgCheck: number;
@@ -776,13 +1047,13 @@ export interface DailyStaffBreakdownSummary {
 }
 
 /**
- * Groups confirmed sales and collected debt payments by responsible staff member
- * and payment method without double counting.
+ * Groups confirmed non-cancelled sales (including mixed/split payments) and collected debt payments
+ * by responsible staff member and payment method without double counting.
  *
  * No double counting:
- * - Credit sales (`borc`) appear ONLY in `nisye` (not counted in drawer cash/card/pos inflow).
- * - Debt collections (`debt.payments`) appear in `naqd`/`kart`/`pos` & `debtInflow` on their `paidAt` date,
- *   never as duplicate product sales.
+ * - Credit portions (`borc`) appear ONLY in `nisye` (never in drawer cash/card/pos inflow).
+ * - Upfront partial payments on split credit sales count ONLY via `sale.paymentSplit` in `naqd`/`kart`/`pos`.
+ * - Subsequent debt collections (`!p.isUpfront`) appear in `naqd`/`kart`/`pos` & `debtInflow` on their `paidAt` date.
  */
 export function calculateDailyStaffBreakdown(params: {
   sales: Sale[];
@@ -807,6 +1078,7 @@ export function calculateDailyStaffBreakdown(params: {
   const normalizedStaffFilter = staffFilter.toLowerCase();
 
   const rowMap: Record<string, StaffPaymentRow> = {};
+  const soldProductMapByStaff: Record<string, Record<string, StaffSoldProductItem>> = {};
   const ensureRow = (username: string): StaffPaymentRow => {
     const key = username.toLowerCase();
     if (!rowMap[key]) {
@@ -818,14 +1090,17 @@ export function calculateDailyStaffBreakdown(params: {
         pos: 0,
         balans: 0,
         nisye: 0,
+        grossSales: 0,
         salesCount: 0,
         debtPaymentsCount: 0,
         avgCheck: 0,
         salesInflow: 0,
         debtInflow: 0,
         totalInflow: 0,
+        soldProducts: [],
         operations: [],
       };
+      soldProductMapByStaff[key] = {};
     }
     return rowMap[key];
   };
@@ -833,45 +1108,80 @@ export function calculateDailyStaffBreakdown(params: {
   // Track gross sales per staff for average check
   const grossSalesSumByStaff: Record<string, number> = {};
 
-  // 1. Aggregate confirmed sales
+  // 1. Aggregate confirmed non-cancelled sales
   for (const s of sales) {
-    if (!s.isConfirmed) continue;
+    if (s.isCancelled) continue;
+    if (!s.isConfirmed && s.paymentType !== 'borc' && !(Number(s.paymentSplit?.borc) > 0)) continue;
     if (s.date < startDate || s.date > endDate) continue;
 
     const staffUser = normalizeStaff(s.createdBy);
-    if (normalizedStaffFilter !== 'all' && staffUser.toLowerCase() !== normalizedStaffFilter) {
+    const staffKey = staffUser.toLowerCase();
+    if (normalizedStaffFilter !== 'all' && staffKey !== normalizedStaffFilter) {
       continue;
     }
 
-    if (paymentFilter !== 'all' && s.paymentType !== paymentFilter) {
-      continue;
-    }
+    const split = resolveSalePaymentSplit(s);
+    const filteredAmt =
+      paymentFilter === 'all'
+        ? round2(s.totalAmount)
+        : paymentFilter === 'naqd'
+        ? split.naqd
+        : paymentFilter === 'kart'
+        ? split.kart
+        : paymentFilter === 'pos'
+        ? split.pos
+        : paymentFilter === 'balans'
+        ? split.balans
+        : paymentFilter === 'borc'
+        ? split.borc
+        : 0;
+
+    if (filteredAmt <= 0) continue;
 
     const row = ensureRow(staffUser);
-    const amt = Number(s.totalAmount) || 0;
     row.salesCount += 1;
-    grossSalesSumByStaff[staffUser.toLowerCase()] =
-      (grossSalesSumByStaff[staffUser.toLowerCase()] || 0) + amt;
+    grossSalesSumByStaff[staffKey] = (grossSalesSumByStaff[staffKey] || 0) + filteredAmt;
+    row.grossSales += filteredAmt;
 
-    switch (s.paymentType) {
-      case 'naqd':
-        row.naqd += amt;
-        row.salesInflow += amt;
-        break;
-      case 'kart':
-        row.kart += amt;
-        row.salesInflow += amt;
-        break;
-      case 'pos':
-        row.pos += amt;
-        row.salesInflow += amt;
-        break;
-      case 'balans':
-        row.balans += amt;
-        break;
-      case 'borc':
-        row.nisye += amt;
-        break;
+    if (paymentFilter === 'all') {
+      row.naqd += split.naqd;
+      row.kart += split.kart;
+      row.pos += split.pos;
+      row.balans += split.balans;
+      row.nisye += split.borc;
+      row.salesInflow += split.naqd + split.kart + split.pos;
+    } else if (paymentFilter === 'naqd') {
+      row.naqd += split.naqd;
+      row.salesInflow += split.naqd;
+    } else if (paymentFilter === 'kart') {
+      row.kart += split.kart;
+      row.salesInflow += split.kart;
+    } else if (paymentFilter === 'pos') {
+      row.pos += split.pos;
+      row.salesInflow += split.pos;
+    } else if (paymentFilter === 'balans') {
+      row.balans += split.balans;
+    } else if (paymentFilter === 'borc') {
+      row.nisye += split.borc;
+    }
+
+    const ratio = s.totalAmount > 0 ? filteredAmt / s.totalAmount : 1;
+    for (const item of s.items || []) {
+      const prodKey = item.productId || (item.productName || '').toLowerCase();
+      if (!soldProductMapByStaff[staffKey][prodKey]) {
+        soldProductMapByStaff[staffKey][prodKey] = {
+          productId: item.productId || prodKey,
+          productName: item.productName || 'Məhsul',
+          quantity: 0,
+          totalAmount: 0,
+        };
+      }
+      soldProductMapByStaff[staffKey][prodKey].quantity = round2(
+        soldProductMapByStaff[staffKey][prodKey].quantity + (Number(item.quantity) || 0) * ratio
+      );
+      soldProductMapByStaff[staffKey][prodKey].totalAmount = round2(
+        soldProductMapByStaff[staffKey][prodKey].totalAmount + (Number(item.totalPrice) || 0) * ratio
+      );
     }
 
     row.operations.push({
@@ -881,16 +1191,25 @@ export function calculateDailyStaffBreakdown(params: {
       time: s.time || '--:--',
       staffUsername: staffUser,
       paymentMethod: s.paymentType,
-      amount: amt,
+      amount: filteredAmt,
       description: s.items.map(i => `${i.productName} (${i.quantity}x)`).join(', '),
       customerOrNote: s.debtorName,
-      badgeText: s.paymentType === 'borc' ? 'Nisyə satış' : 'Satış',
+      badgeText:
+        s.paymentType === 'qarisik'
+          ? formatSalePaymentLabel(s)
+          : s.paymentType === 'borc'
+          ? 'Nisyə satış'
+          : s.paymentType === 'balans'
+          ? 'Balansdan məhsul'
+          : 'Satış',
     });
   }
 
-  // 2. Aggregate collected debt payments (without double counting!)
+  // 2. Aggregate collected subsequent debt payments (without double counting!)
   for (const debt of debts) {
+    if (debt.isCancelled) continue;
     for (const p of debt.payments || []) {
+      if (p.isUpfront) continue;
       const paidDate = (p.paidAt || p.date || '').split('T')[0];
       if (!paidDate || paidDate < startDate || paidDate > endDate) continue;
 
@@ -916,9 +1235,10 @@ export function calculateDailyStaffBreakdown(params: {
       else if (mappedMethod === 'kart') row.kart += amt;
       else row.pos += amt;
 
-      const timeStr = p.createdAt && p.createdAt.includes('T')
-        ? new Date(p.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })
-        : '--:--';
+      const timeStr =
+        p.createdAt && p.createdAt.includes('T')
+          ? new Date(p.createdAt).toLocaleTimeString('az-AZ', { hour: '2-digit', minute: '2-digit' })
+          : '--:--';
 
       row.operations.push({
         id: p.id,
@@ -937,30 +1257,36 @@ export function calculateDailyStaffBreakdown(params: {
 
   const rows: StaffPaymentRow[] = Object.values(rowMap)
     .map(r => {
-      const grossSales = grossSalesSumByStaff[r.staffUsername.toLowerCase()] || 0;
-      const totalInflow = Math.round((r.salesInflow + r.debtInflow) * 100) / 100;
-      const avgCheck = r.salesCount > 0 ? Math.round((grossSales / r.salesCount) * 100) / 100 : 0;
+      const staffKey = r.staffUsername.toLowerCase();
+      const grossSales = round2(grossSalesSumByStaff[staffKey] || 0);
+      const totalInflow = round2(r.salesInflow + r.debtInflow);
+      const avgCheck = r.salesCount > 0 ? round2(grossSales / r.salesCount) : 0;
       const sortedOps = [...r.operations].sort((a, b) => {
         const cmpDate = b.date.localeCompare(a.date);
         if (cmpDate !== 0) return cmpDate;
         return b.time.localeCompare(a.time);
       });
+      const soldProducts = Object.values(soldProductMapByStaff[staffKey] || {}).sort(
+        (a, b) => b.totalAmount - a.totalAmount || b.quantity - a.quantity
+      );
 
       return {
         ...r,
-        naqd: Math.round(r.naqd * 100) / 100,
-        kart: Math.round(r.kart * 100) / 100,
-        pos: Math.round(r.pos * 100) / 100,
-        balans: Math.round(r.balans * 100) / 100,
-        nisye: Math.round(r.nisye * 100) / 100,
-        salesInflow: Math.round(r.salesInflow * 100) / 100,
-        debtInflow: Math.round(r.debtInflow * 100) / 100,
+        naqd: round2(r.naqd),
+        kart: round2(r.kart),
+        pos: round2(r.pos),
+        balans: round2(r.balans),
+        nisye: round2(r.nisye),
+        grossSales,
+        salesInflow: round2(r.salesInflow),
+        debtInflow: round2(r.debtInflow),
         totalInflow,
         avgCheck,
+        soldProducts,
         operations: sortedOps,
       };
     })
-    .sort((a, b) => b.totalInflow - a.totalInflow || a.staffName.localeCompare(b.staffName));
+    .sort((a, b) => b.totalInflow - a.totalInflow || b.grossSales - a.grossSales || a.staffName.localeCompare(b.staffName));
 
   const totals = rows.reduce(
     (acc, r) => ({
@@ -969,6 +1295,7 @@ export function calculateDailyStaffBreakdown(params: {
       pos: acc.pos + r.pos,
       balans: acc.balans + r.balans,
       nisye: acc.nisye + r.nisye,
+      grossSales: acc.grossSales + r.grossSales,
       salesCount: acc.salesCount + r.salesCount,
       debtPaymentsCount: acc.debtPaymentsCount + r.debtPaymentsCount,
       avgCheck: 0,
@@ -982,6 +1309,7 @@ export function calculateDailyStaffBreakdown(params: {
       pos: 0,
       balans: 0,
       nisye: 0,
+      grossSales: 0,
       salesCount: 0,
       debtPaymentsCount: 0,
       avgCheck: 0,
@@ -992,16 +1320,16 @@ export function calculateDailyStaffBreakdown(params: {
   );
 
   const totalGrossSales = Object.values(grossSalesSumByStaff).reduce((s, v) => s + v, 0);
-  totals.avgCheck =
-    totals.salesCount > 0 ? Math.round((totalGrossSales / totals.salesCount) * 100) / 100 : 0;
-  totals.naqd = Math.round(totals.naqd * 100) / 100;
-  totals.kart = Math.round(totals.kart * 100) / 100;
-  totals.pos = Math.round(totals.pos * 100) / 100;
-  totals.balans = Math.round(totals.balans * 100) / 100;
-  totals.nisye = Math.round(totals.nisye * 100) / 100;
-  totals.salesInflow = Math.round(totals.salesInflow * 100) / 100;
-  totals.debtInflow = Math.round(totals.debtInflow * 100) / 100;
-  totals.totalInflow = Math.round(totals.totalInflow * 100) / 100;
+  totals.avgCheck = totals.salesCount > 0 ? round2(totalGrossSales / totals.salesCount) : 0;
+  totals.naqd = round2(totals.naqd);
+  totals.kart = round2(totals.kart);
+  totals.pos = round2(totals.pos);
+  totals.balans = round2(totals.balans);
+  totals.nisye = round2(totals.nisye);
+  totals.grossSales = round2(totals.grossSales);
+  totals.salesInflow = round2(totals.salesInflow);
+  totals.debtInflow = round2(totals.debtInflow);
+  totals.totalInflow = round2(totals.totalInflow);
 
   const allOperations = rows
     .flatMap(r => r.operations)

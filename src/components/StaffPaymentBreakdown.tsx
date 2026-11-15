@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Users,
   Calendar,
@@ -12,6 +12,8 @@ import {
   Smartphone,
   Wallet,
   BookOpen,
+  Layers,
+  PackageCheck,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -54,7 +56,11 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
   const yesterdayISO = getYesterdayISODate();
 
   const [datePreset, setDatePreset] = useState<DatePreset>(
-    defaultDate && defaultDate !== todayISO ? 'custom' : 'today'
+    defaultDate && defaultDate !== todayISO
+      ? defaultDate === yesterdayISO
+        ? 'yesterday'
+        : 'custom'
+      : 'today'
   );
   const [customStart, setCustomStart] = useState<string>(defaultDate || todayISO);
   const [customEnd, setCustomEnd] = useState<string>(defaultDate || todayISO);
@@ -63,6 +69,19 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
   );
   const [paymentFilter, setPaymentFilter] = useState<string>('all');
   const [selectedStaffRow, setSelectedStaffRow] = useState<StaffPaymentRow | null>(null);
+
+  useEffect(() => {
+    if (!defaultDate) return;
+    if (defaultDate === todayISO) {
+      setDatePreset('today');
+    } else if (defaultDate === yesterdayISO) {
+      setDatePreset('yesterday');
+    } else {
+      setDatePreset('custom');
+      setCustomStart(defaultDate);
+      setCustomEnd(defaultDate);
+    }
+  }, [defaultDate, todayISO, yesterdayISO]);
 
   const effectiveStart =
     datePreset === 'today'
@@ -140,6 +159,8 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
         return 'Balans';
       case 'borc':
         return 'Nisyə';
+      case 'qarisik':
+        return 'Qarışıq';
       default:
         return m.toUpperCase();
     }
@@ -274,6 +295,7 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
             <option value="pos">POS / Köçürmə</option>
             <option value="balans">Balans</option>
             <option value="borc">Nisyə</option>
+            <option value="qarisik">Qarışıq</option>
           </select>
         </div>
       </div>
@@ -336,16 +358,17 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
       {/* Pivot Table: Məsul × Ödəniş növü */}
       <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs min-w-[820px]">
+          <table className="w-full text-left text-xs min-w-[940px]">
             <thead className="bg-zinc-100 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
               <tr>
                 <th className="py-3 px-4">Məsul Şəxs</th>
+                <th className="py-3 px-3">Satdığı Məhsullar</th>
                 <th className="py-3 px-3 text-right">Nağd</th>
                 <th className="py-3 px-3 text-right">Kart</th>
                 <th className="py-3 px-3 text-right">POS/Köç.</th>
                 <th className="py-3 px-3 text-right">Balans</th>
                 <th className="py-3 px-3 text-right">Nisyə</th>
-                <th className="py-3 px-3 text-center">Satış Sayı</th>
+                <th className="py-3 px-3 text-center">Satış</th>
                 <th className="py-3 px-3 text-right">Orta Çek</th>
                 <th className="py-3 px-3 text-right">Satışdan</th>
                 <th className="py-3 px-3 text-right">Borcdan</th>
@@ -356,7 +379,7 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
               {breakdown.rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={11}
+                    colSpan={12}
                     className="py-10 text-center text-zinc-500 dark:text-zinc-400"
                   >
                     Seçilmiş tarix və filtrlər üzrə əməliyyat tapılmadı.
@@ -368,12 +391,12 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
                     key={row.staffUsername}
                     className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors"
                   >
-                    <td className="py-3 px-4 whitespace-nowrap">
+                    <td className="py-3 px-4 whitespace-nowrap align-top">
                       <button
                         type="button"
                         onClick={() => setSelectedStaffRow(row)}
                         className="text-left group inline-flex items-center gap-1.5 font-bold text-zinc-900 dark:text-white hover:text-red-600 dark:hover:text-red-400"
-                        title="Bu məsulun ətraflı əməliyyat siyahısını aç"
+                        title="Bu məsulun ətraflı məhsul və ödəniş siyahısını aç"
                       >
                         <span>{row.staffName}</span>
                         <ArrowUpRight className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100" />
@@ -382,34 +405,57 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
                         @{row.staffUsername}
                       </div>
                     </td>
-                    <td className="py-3 px-3 text-right font-mono text-emerald-700 dark:text-emerald-400 font-semibold">
+                    <td className="py-3 px-3 align-top max-w-[210px]">
+                      {row.soldProducts.length === 0 ? (
+                        <span className="text-[11px] text-zinc-400">—</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedStaffRow(row)}
+                          className="text-left space-y-0.5 hover:opacity-80"
+                        >
+                          {row.soldProducts.slice(0, 2).map(sp => (
+                            <div key={sp.productName} className="text-[11px] text-zinc-700 dark:text-zinc-300 truncate max-w-[195px]">
+                              <span className="font-semibold">{sp.productName}</span>{' '}
+                              <span className="font-mono text-zinc-500">×{sp.quantity}</span>
+                            </div>
+                          ))}
+                          {row.soldProducts.length > 2 && (
+                            <div className="text-[10px] font-bold text-red-600 dark:text-red-400">
+                              +{row.soldProducts.length - 2} məhsul daha
+                            </div>
+                          )}
+                        </button>
+                      )}
+                    </td>
+                    <td className="py-3 px-3 text-right font-mono tabular-nums text-emerald-700 dark:text-emerald-400 font-semibold align-top">
                       {formatAZN(row.naqd)}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono text-blue-700 dark:text-blue-400 font-semibold">
+                    <td className="py-3 px-3 text-right font-mono tabular-nums text-blue-700 dark:text-blue-400 font-semibold align-top">
                       {formatAZN(row.kart)}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono text-zinc-800 dark:text-zinc-200 font-semibold">
+                    <td className="py-3 px-3 text-right font-mono tabular-nums text-zinc-800 dark:text-zinc-200 font-semibold align-top">
                       {formatAZN(row.pos)}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono text-amber-700 dark:text-amber-400">
+                    <td className="py-3 px-3 text-right font-mono tabular-nums text-amber-700 dark:text-amber-400 align-top">
                       {formatAZN(row.balans)}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono text-red-600 dark:text-red-400">
+                    <td className="py-3 px-3 text-right font-mono tabular-nums text-red-600 dark:text-red-400 align-top">
                       {formatAZN(row.nisye)}
                     </td>
-                    <td className="py-3 px-3 text-center font-mono font-bold text-zinc-900 dark:text-white">
+                    <td className="py-3 px-3 text-center font-mono tabular-nums font-bold text-zinc-900 dark:text-white align-top">
                       {row.salesCount}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono text-zinc-600 dark:text-zinc-300">
+                    <td className="py-3 px-3 text-right font-mono tabular-nums text-zinc-600 dark:text-zinc-300 align-top">
                       {formatAZN(row.avgCheck)}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono text-zinc-800 dark:text-zinc-200">
+                    <td className="py-3 px-3 text-right font-mono tabular-nums text-zinc-800 dark:text-zinc-200 align-top">
                       {formatAZN(row.salesInflow)}
                     </td>
-                    <td className="py-3 px-3 text-right font-mono text-amber-700 dark:text-amber-400">
+                    <td className="py-3 px-3 text-right font-mono tabular-nums text-amber-700 dark:text-amber-400 align-top">
                       {formatAZN(row.debtInflow)}
                     </td>
-                    <td className="py-3 px-4 text-right font-mono font-extrabold text-zinc-900 dark:text-white">
+                    <td className="py-3 px-4 text-right font-mono tabular-nums font-extrabold text-zinc-900 dark:text-white align-top">
                       {formatAZN(row.totalInflow)}
                     </td>
                   </tr>
@@ -420,34 +466,37 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
               <tfoot className="bg-zinc-100 dark:bg-zinc-950 font-bold border-t border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-white">
                 <tr>
                   <td className="py-3 px-4 uppercase text-[11px] tracking-wider">CƏMİ</td>
-                  <td className="py-3 px-3 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                  <td className="py-3 px-3 text-[11px] text-zinc-500 font-normal">
+                    {breakdown.rows.reduce((s, r) => s + r.soldProducts.reduce((q, p) => q + p.quantity, 0), 0)} ədəd
+                  </td>
+                  <td className="py-3 px-3 text-right font-mono tabular-nums text-emerald-700 dark:text-emerald-400">
                     {formatAZN(breakdown.totals.naqd)}
                   </td>
-                  <td className="py-3 px-3 text-right font-mono text-blue-700 dark:text-blue-400">
+                  <td className="py-3 px-3 text-right font-mono tabular-nums text-blue-700 dark:text-blue-400">
                     {formatAZN(breakdown.totals.kart)}
                   </td>
-                  <td className="py-3 px-3 text-right font-mono">
+                  <td className="py-3 px-3 text-right font-mono tabular-nums">
                     {formatAZN(breakdown.totals.pos)}
                   </td>
-                  <td className="py-3 px-3 text-right font-mono text-amber-700 dark:text-amber-400">
+                  <td className="py-3 px-3 text-right font-mono tabular-nums text-amber-700 dark:text-amber-400">
                     {formatAZN(breakdown.totals.balans)}
                   </td>
-                  <td className="py-3 px-3 text-right font-mono text-red-600 dark:text-red-400">
+                  <td className="py-3 px-3 text-right font-mono tabular-nums text-red-600 dark:text-red-400">
                     {formatAZN(breakdown.totals.nisye)}
                   </td>
-                  <td className="py-3 px-3 text-center font-mono">
+                  <td className="py-3 px-3 text-center font-mono tabular-nums">
                     {breakdown.totals.salesCount}
                   </td>
-                  <td className="py-3 px-3 text-right font-mono">
+                  <td className="py-3 px-3 text-right font-mono tabular-nums">
                     {formatAZN(breakdown.totals.avgCheck)}
                   </td>
-                  <td className="py-3 px-3 text-right font-mono">
+                  <td className="py-3 px-3 text-right font-mono tabular-nums">
                     {formatAZN(breakdown.totals.salesInflow)}
                   </td>
-                  <td className="py-3 px-3 text-right font-mono text-amber-700 dark:text-amber-400">
+                  <td className="py-3 px-3 text-right font-mono tabular-nums text-amber-700 dark:text-amber-400">
                     {formatAZN(breakdown.totals.debtInflow)}
                   </td>
-                  <td className="py-3 px-4 text-right font-mono text-sm">
+                  <td className="py-3 px-4 text-right font-mono tabular-nums text-sm">
                     {formatAZN(breakdown.totals.totalInflow)}
                   </td>
                 </tr>
@@ -533,61 +582,99 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
               </button>
             </div>
 
-            <div className="p-5 sm:p-6 overflow-y-auto space-y-2.5 flex-1">
-              {selectedStaffRow.operations.length === 0 ? (
-                <div className="py-10 text-center text-xs text-zinc-500">
-                  Əməliyyat tapılmadı.
-                </div>
-              ) : (
-                selectedStaffRow.operations.map(op => (
-                  <div
-                    key={`${op.kind}-${op.id}`}
-                    className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
-                  >
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${
-                            op.kind === 'debt_payment'
-                              ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                              : op.paymentMethod === 'borc'
-                              ? 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
-                              : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
-                          }`}
-                        >
-                          {op.badgeText || (op.kind === 'debt_payment' ? 'Borc ödənişi (ödənildi)' : 'Satış')}
-                        </span>
-
-                        <span className="text-[11px] font-mono text-zinc-500">
-                          {formatDateAZ(op.date)} {op.time}
-                        </span>
-
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
-                          {op.paymentMethod === 'naqd' && <Banknote className="w-3 h-3 text-emerald-500" />}
-                          {op.paymentMethod === 'kart' && <CreditCard className="w-3 h-3 text-blue-500" />}
-                          {op.paymentMethod === 'pos' && <Smartphone className="w-3 h-3 text-red-500" />}
-                          {op.paymentMethod === 'balans' && <Wallet className="w-3 h-3 text-amber-500" />}
-                          {op.paymentMethod === 'borc' && <BookOpen className="w-3 h-3 text-red-500" />}
-                          <span>{paymentLabel(op.paymentMethod)}</span>
-                        </span>
-                      </div>
-
-                      <div className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 truncate">
-                        {op.description}
-                      </div>
-                      {op.customerOrNote && (
-                        <div className="text-[11px] text-zinc-500">
-                          {op.customerOrNote}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="text-right font-mono font-extrabold text-sm text-zinc-900 dark:text-white shrink-0">
-                      {formatAZN(op.amount)}
-                    </div>
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-4 flex-1">
+              {/* Itemized Sold Products by Staff */}
+              {selectedStaffRow.soldProducts.length > 0 && (
+                <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-zinc-600 dark:text-zinc-300 flex items-center gap-1.5">
+                      <PackageCheck className="w-3.5 h-3.5 text-emerald-500" />
+                      <span>Satdığı Məhsullar ({selectedStaffRow.soldProducts.length} çeşid)</span>
+                    </span>
+                    <span className="text-[11px] font-mono tabular-nums font-bold text-zinc-700 dark:text-zinc-300">
+                      Cəmi satış: {formatAZN(selectedStaffRow.grossSales)}
+                    </span>
                   </div>
-                ))
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                    {selectedStaffRow.soldProducts.map(sp => (
+                      <div
+                        key={sp.productName}
+                        className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-2 text-xs"
+                      >
+                        <span className="font-semibold text-zinc-800 dark:text-zinc-200 truncate">
+                          {sp.productName}
+                        </span>
+                        <span className="font-mono tabular-nums text-[11px] text-zinc-600 dark:text-zinc-300 shrink-0">
+                          {sp.quantity} əd. · <strong>{formatAZN(sp.totalAmount)}</strong>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
+
+              <div className="space-y-2">
+                <div className="text-[11px] font-extrabold uppercase tracking-wider text-zinc-500">
+                  Əməliyyatların Xronoloji Siyahısı
+                </div>
+                {selectedStaffRow.operations.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-zinc-500">
+                    Əməliyyat tapılmadı.
+                  </div>
+                ) : (
+                  selectedStaffRow.operations.map(op => (
+                    <div
+                      key={`${op.kind}-${op.id}`}
+                      className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                    >
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider ${
+                              op.kind === 'debt_payment'
+                                ? 'bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                                : op.paymentMethod === 'borc'
+                                ? 'bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800'
+                                : op.paymentMethod === 'qarisik'
+                                ? 'bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800'
+                                : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                            }`}
+                          >
+                            {op.badgeText || (op.kind === 'debt_payment' ? 'Borc ödənişi (ödənildi)' : 'Satış')}
+                          </span>
+
+                          <span className="text-[11px] font-mono tabular-nums text-zinc-500">
+                            {formatDateAZ(op.date)} {op.time}
+                          </span>
+
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-600 dark:text-zinc-300">
+                            {op.paymentMethod === 'naqd' && <Banknote className="w-3 h-3 text-emerald-500" />}
+                            {op.paymentMethod === 'kart' && <CreditCard className="w-3 h-3 text-blue-500" />}
+                            {op.paymentMethod === 'pos' && <Smartphone className="w-3 h-3 text-red-500" />}
+                            {op.paymentMethod === 'balans' && <Wallet className="w-3 h-3 text-amber-500" />}
+                            {op.paymentMethod === 'borc' && <BookOpen className="w-3 h-3 text-red-500" />}
+                            {op.paymentMethod === 'qarisik' && <Layers className="w-3 h-3 text-purple-500" />}
+                            <span>{paymentLabel(op.paymentMethod)}</span>
+                          </span>
+                        </div>
+
+                        <div className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 truncate">
+                          {op.description}
+                        </div>
+                        {op.customerOrNote && (
+                          <div className="text-[11px] text-zinc-500">
+                            {op.customerOrNote}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="text-right font-mono tabular-nums font-extrabold text-sm text-zinc-900 dark:text-white shrink-0">
+                        {formatAZN(op.amount)}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </div>
         </div>

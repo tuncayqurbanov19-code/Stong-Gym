@@ -43,7 +43,22 @@ export interface CartItem {
   unitPrice: number;
 }
 
-export type PaymentType = 'naqd' | 'kart' | 'pos' | 'borc' | 'balans';
+export type PaymentType = 'naqd' | 'kart' | 'pos' | 'borc' | 'balans' | 'qarisik';
+
+export interface SalePaymentSplit {
+  naqd?: number;
+  kart?: number;
+  pos?: number;
+  balans?: number;
+  borc?: number;
+}
+
+export interface SaleEditEntry {
+  timestamp: string;
+  editedBy: string;
+  action: 'created' | 'date_changed' | 'cancelled' | 'edited';
+  details: string;
+}
 
 export interface SaleItem {
   productId: string;
@@ -62,6 +77,7 @@ export interface Sale {
   discountAmount?: number; // Verilən endirim (AZN)
   totalAmount: number; // Yekun məbləğ (subtotal - discount)
   paymentType: PaymentType;
+  paymentSplit?: SalePaymentSplit; // Qarışıq və ya qismən ödəniş bölgüsü
   debtorName?: string;
   debtorPhone?: string;
   originalDate?: string; // Tarix dəyişdirilibsə ilk əməliyyat tarixi
@@ -70,6 +86,11 @@ export interface Sale {
   isConfirmed: boolean;
   confirmedAt?: string;
   confirmedBy?: string;
+  isCancelled?: boolean;
+  cancelledAt?: string;
+  cancelledBy?: string;
+  cancelReason?: string;
+  editHistory?: SaleEditEntry[];
   createdAt: string; // Faktiki sistemə daxil edilmə vaxtı (ISO timestamp)
   createdBy: string;
 }
@@ -85,6 +106,7 @@ export interface DebtPayment {
   paymentMethod?: DebtPaymentMethod;
   receivedBy?: string;
   note?: string;
+  isUpfront?: boolean; // Satış zamanı ilkin ödəniş hissəsi (ikiqat hesablamamaq üçün)
   createdAt?: string;
 }
 
@@ -107,6 +129,9 @@ export interface DebtRecord {
   saleId?: string;
   notes?: string;
   payments: DebtPayment[];
+  isCancelled?: boolean;
+  cancelledAt?: string;
+  cancelledBy?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -179,7 +204,7 @@ export interface DepoMovement {
   referenceId?: string;
   date: string; // YYYY-MM-DD
   time: string; // HH:mm
-  sourceLabel?: string; // məs: 'Müştəri balansından çıxarış'
+  sourceLabel?: string; // məs: 'Müştəri balansından məhsul çıxarışı'
   note?: string;
   createdBy: string;
   idempotencyKey?: string;

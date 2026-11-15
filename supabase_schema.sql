@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS public.sales (
     subtotal_amount NUMERIC(10, 2),
     discount_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
     total_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
-    payment_type TEXT NOT NULL CHECK (payment_type IN ('naqd', 'kart', 'pos', 'borc', 'balans')),
+    payment_type TEXT NOT NULL CHECK (payment_type IN ('naqd', 'kart', 'pos', 'borc', 'balans', 'qarisik')),
+    payment_split JSONB,
     debtor_name TEXT,
     debtor_phone TEXT,
     original_date TEXT,
@@ -64,6 +65,11 @@ CREATE TABLE IF NOT EXISTS public.sales (
     is_confirmed BOOLEAN NOT NULL DEFAULT true,
     confirmed_at TIMESTAMPTZ,
     confirmed_by TEXT,
+    is_cancelled BOOLEAN NOT NULL DEFAULT false,
+    cancelled_at TIMESTAMPTZ,
+    cancelled_by TEXT,
+    cancel_reason TEXT,
+    edit_history JSONB NOT NULL DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     created_by TEXT NOT NULL
 );
@@ -82,6 +88,9 @@ CREATE TABLE IF NOT EXISTS public.debts (
     sale_id TEXT,
     notes TEXT,
     payments JSONB NOT NULL DEFAULT '[]'::jsonb,
+    is_cancelled BOOLEAN NOT NULL DEFAULT false,
+    cancelled_at TIMESTAMPTZ,
+    cancelled_by TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
@@ -95,6 +104,7 @@ CREATE TABLE IF NOT EXISTS public.debt_payments (
     received_by TEXT NOT NULL DEFAULT 'admin',
     paid_at TEXT NOT NULL,
     note TEXT,
+    is_upfront BOOLEAN NOT NULL DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
@@ -764,23 +774,54 @@ AS $$
   WITH filtered_sales AS (
     SELECT *
     FROM public.sales s
-    WHERE (s.is_confirmed = true OR s.payment_type = 'borc')
+    WHERE COALESCE(s.is_cancelled, false) = false
+      AND (s.is_confirmed = true OR s.payment_type = 'borc' OR COALESCE((s.payment_split->>'borc')::numeric, 0) > 0)
       AND s.date >= p_start_date
       AND s.date <= p_end_date
   ),
   s_agg AS (
     SELECT
       COALESCE(SUM(total_amount), 0) AS gross_sales_total,
-      COALESCE(SUM(CASE WHEN payment_type <> 'balans' THEN total_amount ELSE 0 END), 0) AS normal_sales_total,
+      COALESCE(SUM(
+        CASE
+          WHEN payment_split IS NOT NULL THEN
+            COALESCE((payment_split->>'naqd')::numeric, 0)
+            + COALESCE((payment_split->>'kart')::numeric, 0)
+            + COALESCE((payment_split->>'pos')::numeric, 0)
+            + COALESCE((payment_split->>'borc')::numeric, 0)
+          WHEN payment_type <> 'balans' THEN total_amount
+          ELSE 0
+        END
+      ), 0) AS normal_sales_total,
       COUNT(*) AS sales_count,
       COALESCE(SUM(COALESCE(discount_amount, 0)), 0) AS total_discounts,
-      COALESCE(SUM(CASE WHEN payment_type = 'naqd' THEN total_amount ELSE 0 END), 0) AS cash_sales,
-      COALESCE(SUM(CASE WHEN payment_type = 'kart' THEN total_amount ELSE 0 END), 0) AS card_sales,
-      COALESCE(SUM(CASE WHEN payment_type = 'pos' THEN total_amount ELSE 0 END), 0) AS pos_sales,
-      COALESCE(SUM(CASE WHEN payment_type = 'balans' THEN total_amount ELSE 0 END), 0) AS balance_sales,
-      COALESCE(SUM(CASE WHEN payment_type = 'borc' THEN total_amount ELSE 0 END), 0) AS credit_sales,
-      COALESCE(SUM(CASE WHEN payment_type IN ('naqd', 'kart', 'pos') THEN total_amount ELSE 0 END), 0) AS sales_real_inflow
+      COALESCE(SUM(
+        CASE WHEN payment_split IS NOT NULL THEN COALESCE((payment_split->>'naqd')::numeric, 0)
+             WHEN payment_type = 'naqd' THEN total_amount ELSE 0 END
+      ), 0) AS cash_sales,
+      COALESCE(SUM(
+        CASE WHEN payment_split IS NOT NULL THEN COALESCE((payment_split->>'kart')::numeric, 0)
+             WHEN payment_type = 'kart' THEN total_amount ELSE 0 END
+      ), 0) AS card_sales,
+      COALESCE(SUM(
+        CASE WHEN payment_split IS NOT NULL THEN COALESCE((payment_split->>'pos')::numeric, 0)
+             WHEN payment_type = 'pos' THEN total_amount ELSE 0 END
+      ), 0) AS pos_sales,
+      COALESCE(SUM(
+        CASE WHEN payment_split IS NOT NULL THEN COALESCE((payment_split->>'balans')::numeric, 0)
+             WHEN payment_type = 'balans' THEN total_amount ELSE 0 END
+      ), 0) AS balance_sales,
+      COALESCE(SUM(
+        CASE WHEN payment_split IS NOT NULL THEN COALESCE((payment_split->>'borc')::numeric, 0)
+             WHEN payment_type = 'borc' THEN total_amount ELSE 0 END
+      ), 0) AS credit_sales
     FROM filtered_sales
+  ),
+  s_totals AS (
+    SELECT
+      *,
+      (cash_sales + card_sales + pos_sales) AS sales_real_inflow
+    FROM s_agg
   ),
   items_agg AS (
     SELECT
@@ -790,14 +831,17 @@ AS $$
   ),
   dp_agg AS (
     SELECT
-      COALESCE(SUM(amount), 0) AS debt_collected_total,
-      COALESCE(SUM(CASE WHEN payment_method = 'naqd' THEN amount ELSE 0 END), 0) AS debt_collected_cash,
-      COALESCE(SUM(CASE WHEN payment_method = 'kart' THEN amount ELSE 0 END), 0) AS debt_collected_card,
-      COALESCE(SUM(CASE WHEN payment_method IN ('pos', 'kocurme') THEN amount ELSE 0 END), 0) AS debt_collected_pos,
+      COALESCE(SUM(dp.amount), 0) AS debt_collected_total,
+      COALESCE(SUM(CASE WHEN dp.payment_method = 'naqd' THEN dp.amount ELSE 0 END), 0) AS debt_collected_cash,
+      COALESCE(SUM(CASE WHEN dp.payment_method = 'kart' THEN dp.amount ELSE 0 END), 0) AS debt_collected_card,
+      COALESCE(SUM(CASE WHEN dp.payment_method IN ('pos', 'kocurme') THEN dp.amount ELSE 0 END), 0) AS debt_collected_pos,
       COUNT(*) AS debt_collected_count
-    FROM public.debt_payments
-    WHERE paid_at >= p_start_date
-      AND paid_at <= p_end_date
+    FROM public.debt_payments dp
+    JOIN public.debts d ON d.id = dp.debt_id
+    WHERE COALESCE(d.is_cancelled, false) = false
+      AND COALESCE(dp.is_upfront, false) = false
+      AND dp.paid_at >= p_start_date
+      AND dp.paid_at <= p_end_date
   ),
   bal_agg AS (
     SELECT
@@ -823,7 +867,8 @@ AS $$
   unpaid_agg AS (
     SELECT COALESCE(SUM(remaining_amount), 0) AS total_unpaid_debts
     FROM public.debts
-    WHERE status IN ('borcdadir', 'qismen')
+    WHERE COALESCE(is_cancelled, false) = false
+      AND status IN ('borcdadir', 'qismen')
       AND remaining_amount > 0
   )
   SELECT
@@ -854,7 +899,7 @@ AS $$
     (pur.purchases_outflow + exp.expenses_outflow + b.balance_cash_withdrawals) AS total_cash_outflow,
     ((s.sales_real_inflow + dp.debt_collected_total) - (pur.purchases_outflow + exp.expenses_outflow + b.balance_cash_withdrawals)) AS net_cash_balance,
     u.total_unpaid_debts
-  FROM s_agg s, items_agg ia, dp_agg dp, bal_agg b, pur_agg pur, exp_agg exp, unpaid_agg u;
+  FROM s_totals s, items_agg ia, dp_agg dp, bal_agg b, pur_agg pur, exp_agg exp, unpaid_agg u;
 $$;
 
 -- Balans və Depo Atomik RPC-ləri:
@@ -1096,7 +1141,9 @@ BEGIN
   SELECT COALESCE(SUM(quantity), 0)::integer INTO v_purchased FROM public.purchases WHERE product_id = v_prod.id;
   SELECT COALESCE(SUM(COALESCE((elem->>'quantity')::integer, 0)), 0)::integer INTO v_sold
   FROM public.sales s CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.items, '[]'::jsonb)) AS elem
-  WHERE (s.is_confirmed = true OR s.payment_type = 'borc') AND elem->>'productId' = v_prod.id;
+  WHERE COALESCE(s.is_cancelled, false) = false
+    AND (s.is_confirmed = true OR s.payment_type = 'borc' OR COALESCE((s.payment_split->>'borc')::numeric, 0) > 0)
+    AND elem->>'productId' = v_prod.id;
 
   v_active_stock := v_prod.initial_stock + v_purchased - v_sold;
   IF v_active_stock < p_quantity THEN
@@ -1119,10 +1166,13 @@ BEGIN
 
   INSERT INTO public.sales (
     id, date, time, items, subtotal_amount, discount_amount, total_amount,
-    payment_type, debtor_name, original_date, is_confirmed, confirmed_at, confirmed_by, created_at, created_by
+    payment_type, debtor_name, original_date, is_confirmed, confirmed_at, confirmed_by,
+    is_cancelled, edit_history, created_at, created_by
   ) VALUES (
     v_sale_id, v_date, v_time, v_sale_items, v_total_amount, 0, v_total_amount,
-    'balans', v_cust.name, v_date, true, v_now, v_actor, v_now, v_actor
+    'balans', v_cust.name, v_date, true, v_now, v_actor,
+    false, jsonb_build_array(jsonb_build_object('timestamp', v_now, 'editedBy', v_actor, 'action', 'created', 'details', 'Müştəri balansından məhsul çıxarışı')),
+    v_now, v_actor
   );
 
   v_tx_obj := jsonb_build_object(
@@ -1130,7 +1180,7 @@ BEGIN
     'amount', v_total_amount, 'balanceBefore', v_cust.balance, 'balanceAfter', v_bal_after,
     'paymentMethod', 'balans', 'productId', v_prod.id, 'productName', v_prod.name, 'quantity', p_quantity, 'unitPrice', v_unit_price,
     'saleId', v_sale_id, 'date', v_date, 'time', v_time,
-    'note', COALESCE(NULLIF(TRIM(p_note), ''), 'Balansdan məhsul çıxarışı: ' || v_prod.name || ' × ' || p_quantity),
+    'note', COALESCE(NULLIF(TRIM(p_note), ''), 'Müştəri balansından məhsul çıxarışı: ' || v_prod.name || ' × ' || p_quantity),
     'createdBy', v_actor, 'createdAt', v_now
   );
 
@@ -1153,8 +1203,8 @@ BEGIN
     unit_price, total_amount, customer_name, reference_id, movement_date, movement_time, source_label, note, created_by, idempotency_key, created_at
   ) VALUES (
     v_dm_id, 'balance_product_out', v_prod.id, v_prod.name, -p_quantity, v_active_stock, v_active_stock - p_quantity,
-    v_unit_price, v_total_amount, v_cust.name, v_sale_id, v_date, v_time, 'Müştəri balansından çıxarış',
-    v_cust.name || ' · Müştəri balansından çıxarış', v_actor, NULLIF(TRIM(p_idempotency_key), ''), v_now
+    v_unit_price, v_total_amount, v_cust.name, v_sale_id, v_date, v_time, 'Müştəri balansından məhsul çıxarışı',
+    v_cust.name || ' · Müştəri balansından məhsul çıxarışı', v_actor, NULLIF(TRIM(p_idempotency_key), ''), v_now
   );
 
   RETURN jsonb_build_object(
@@ -1270,7 +1320,9 @@ BEGIN
   SELECT COALESCE(SUM(quantity), 0)::integer INTO v_purchased FROM public.purchases WHERE product_id = v_prod.id;
   SELECT COALESCE(SUM(COALESCE((elem->>'quantity')::integer, 0)), 0)::integer INTO v_sold
   FROM public.sales s CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.items, '[]'::jsonb)) AS elem
-  WHERE (s.is_confirmed = true OR s.payment_type = 'borc') AND elem->>'productId' = v_prod.id;
+  WHERE COALESCE(s.is_cancelled, false) = false
+    AND (s.is_confirmed = true OR s.payment_type = 'borc' OR COALESCE((s.payment_split->>'borc')::numeric, 0) > 0)
+    AND elem->>'productId' = v_prod.id;
 
   v_old_active := v_prod.initial_stock + v_purchased - v_sold;
   v_new_initial := GREATEST(0, v_new_active - v_purchased + v_sold);
@@ -1290,6 +1342,57 @@ BEGIN
   END IF;
 
   RETURN jsonb_build_object('product_id', v_prod.id, 'stock_before', v_old_active, 'stock_after', v_new_active, 'delta', v_delta, 'movement_id', v_dm_id);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.cancel_sale_atomic(
+  p_sale_id TEXT,
+  p_reason TEXT DEFAULT 'Satış ləğv edildi',
+  p_actor_username TEXT DEFAULT 'admin'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_sale public.sales%ROWTYPE;
+  v_now TIMESTAMPTZ := timezone('utc'::text, now());
+  v_actor TEXT := COALESCE(NULLIF(TRIM(p_actor_username), ''), 'admin');
+  v_reason TEXT := COALESCE(NULLIF(TRIM(p_reason), ''), 'Satış ləğv edildi');
+  v_entry JSONB;
+BEGIN
+  SELECT * INTO v_sale FROM public.sales WHERE id = p_sale_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Satış qeydi tapılmadı: %', p_sale_id; END IF;
+  IF COALESCE(v_sale.is_cancelled, false) THEN
+    RETURN jsonb_build_object('status', 'already_cancelled', 'sale_id', p_sale_id);
+  END IF;
+
+  v_entry := jsonb_build_object(
+    'timestamp', v_now,
+    'editedBy', v_actor,
+    'action', 'cancelled',
+    'details', v_reason
+  );
+
+  UPDATE public.sales
+  SET is_cancelled = true,
+      cancelled_at = v_now,
+      cancelled_by = v_actor,
+      cancel_reason = v_reason,
+      updated_at = v_now,
+      edit_history = COALESCE(edit_history, '[]'::jsonb) || jsonb_build_array(v_entry)
+  WHERE id = p_sale_id;
+
+  UPDATE public.debts
+  SET is_cancelled = true,
+      cancelled_at = v_now,
+      cancelled_by = v_actor,
+      updated_at = v_now,
+      notes = CASE WHEN notes IS NULL OR notes = '' THEN 'Ləğv edilib: ' || v_reason ELSE notes || ' · Ləğv edilib: ' || v_reason END
+  WHERE sale_id = p_sale_id AND COALESCE(is_cancelled, false) = false;
+
+  RETURN jsonb_build_object('status', 'cancelled', 'sale_id', p_sale_id);
 END;
 $$;
 

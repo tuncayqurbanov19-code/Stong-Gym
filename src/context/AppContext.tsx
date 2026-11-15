@@ -15,9 +15,12 @@ import {
   DebtPayment,
   DebtPaymentMethod,
   SaleItem,
+  SalePaymentSplit,
+  SaleEditEntry,
 } from '../types';
 import { getTodayISODate, getCurrentTimeHHMM } from '../utils/dateUtils';
 import { calculateProductStock } from '../utils/stockCalculations';
+import { formatSalePaymentLabel, resolveSalePaymentSplit } from '../utils/financialCalculations';
 import {
   requestNotificationPermission,
   sendLowStockNotification,
@@ -172,6 +175,7 @@ interface AppContextType {
   addSale: (saleData: {
     items: { productId: string; quantity: number }[];
     paymentType: Sale['paymentType'];
+    paymentSplit?: SalePaymentSplit;
     debtorName?: string;
     debtorPhone?: string;
     discountAmount?: number;
@@ -181,6 +185,7 @@ interface AppContextType {
   updateSaleDate: (saleId: string, newDate: string, newTime?: string) => { success: boolean; error?: string };
   confirmSale: (saleId: string) => void;
   confirmDaySales: (date: string) => void;
+  cancelSale: (saleId: string, reason?: string) => { success: boolean; error?: string };
   deleteSale: (saleId: string) => void;
   debts: DebtRecord[];
   addDebt: (
@@ -1288,15 +1293,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       for (const date of uniqueDates) {
         const existing = next.find(r => r.date === date);
         const allSalesForDay = baseSales.filter(
-          s => s.date === date && s.isConfirmed && s.paymentType !== 'borc' && s.paymentType !== 'balans'
+          s => s.date === date && !s.isCancelled && s.isConfirmed
         );
-        const allDebtPaymentsForDay = activeDebts.flatMap(d =>
-          (d.payments || []).filter(p => (p.paidAt || p.date || '').split('T')[0] === date)
-        );
+        const allDebtPaymentsForDay = activeDebts
+          .filter(d => !d.isCancelled)
+          .flatMap(d =>
+            (d.payments || []).filter(
+              p => !p.isUpfront && (p.paidAt || p.date || '').split('T')[0] === date
+            )
+          );
 
-        let cash = allSalesForDay.filter(s => s.paymentType === 'naqd').reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
-        let card = allSalesForDay.filter(s => s.paymentType === 'kart').reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
-        let pos = allSalesForDay.filter(s => s.paymentType === 'pos').reduce((sum, s) => sum + (Number(s.totalAmount) || 0), 0);
+        let cash = 0;
+        let card = 0;
+        let pos = 0;
+        for (const s of allSalesForDay) {
+          const split = resolveSalePaymentSplit(s);
+          cash += split.naqd;
+          card += split.kart;
+          pos += split.pos;
+        }
 
         for (const p of allDebtPaymentsForDay) {
           const amt = Number(p.amount) || 0;
@@ -1812,8 +1827,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       referenceId: saleId,
       date,
       time,
-      sourceLabel: 'Müştəri balansından çıxarış',
-      note: `${existing.name} · Müştəri balansından çıxarış`,
+      sourceLabel: 'Müştəri balansından məhsul çıxarışı',
+      note: `${existing.name} · Müştəri balansından məhsul çıxarışı`,
       createdBy: actor,
       idempotencyKey: idemKey,
       createdAt: nowIso,
@@ -2034,6 +2049,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const addSale = (saleData: {
     items: { productId: string; quantity: number }[];
     paymentType: Sale['paymentType'];
+    paymentSplit?: SalePaymentSplit;
     debtorName?: string;
     debtorPhone?: string;
     discountAmount?: number;
@@ -2044,7 +2060,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, error: 'Səbət boşdur!' };
     }
 
-    // Consolidate duplicate product lines to prevent double counting / validation gaps
     const consolidatedQty: Record<string, number> = {};
     for (const it of saleData.items) {
       const q = Math.floor(Number(it.quantity) || 0);
@@ -2058,8 +2073,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return { success: false, error: 'Etibarlı məhsul və ya say daxil edilməyib!' };
     }
 
-    // Guard against rapid accidental double click (identical payload within 700ms)
-    const saleSig = JSON.stringify({ entries, pt: saleData.paymentType, dn: saleData.debtorName, d: saleData.customDate });
+    const saleSig = JSON.stringify({
+      entries,
+      pt: saleData.paymentType,
+      ps: saleData.paymentSplit,
+      dn: saleData.debtorName,
+      d: saleData.customDate,
+    });
     const nowTs = Date.now();
     if (lastSaleGuardRef.current.sig === saleSig && nowTs - lastSaleGuardRef.current.ts < 700) {
       return { success: false, error: 'Əməliyyat artıq icra olunur.' };
@@ -2092,18 +2112,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    subtotalAmount = Math.round(subtotalAmount * 100) / 100;
+    const round2 = (v: number) => Math.round((Number(v) || 0) * 100) / 100;
+    subtotalAmount = round2(subtotalAmount);
 
     if (resolvedItems.length === 0) {
       return { success: false, error: 'Məhsul tapılmadı!' };
     }
 
     const rawDiscount = Math.max(0, Number(saleData.discountAmount) || 0);
-    const discountAmount = Math.min(subtotalAmount, Math.round(rawDiscount * 100) / 100);
-    const totalAmount = Math.max(0, Math.round((subtotalAmount - discountAmount) * 100) / 100);
+    const discountAmount = Math.min(subtotalAmount, round2(rawDiscount));
+    const totalAmount = Math.max(0, round2(subtotalAmount - discountAmount));
 
-    if (saleData.paymentType === 'borc' && !(saleData.debtorName || '').trim()) {
-      return { success: false, error: 'Nisyə satış üçün borclunun ad və soyadı mütləqdir!' };
+    // Resolve normalized 5-channel split
+    let resolvedSplit: Required<SalePaymentSplit>;
+    if (saleData.paymentSplit) {
+      resolvedSplit = {
+        naqd: Math.max(0, round2(saleData.paymentSplit.naqd || 0)),
+        kart: Math.max(0, round2(saleData.paymentSplit.kart || 0)),
+        pos: Math.max(0, round2(saleData.paymentSplit.pos || 0)),
+        balans: Math.max(0, round2(saleData.paymentSplit.balans || 0)),
+        borc: Math.max(0, round2(saleData.paymentSplit.borc || 0)),
+      };
+      const splitSum = round2(
+        resolvedSplit.naqd +
+          resolvedSplit.kart +
+          resolvedSplit.pos +
+          resolvedSplit.balans +
+          resolvedSplit.borc
+      );
+      if (Math.abs(splitSum - totalAmount) > 0.02) {
+        return {
+          success: false,
+          error: `Ödəniş bölgüsünün cəmi (${splitSum.toFixed(2)} ₼) yekun məbləğə (${totalAmount.toFixed(2)} ₼) bərabər olmalıdır!`,
+        };
+      }
+    } else {
+      resolvedSplit = {
+        naqd: saleData.paymentType === 'naqd' ? totalAmount : 0,
+        kart: saleData.paymentType === 'kart' ? totalAmount : 0,
+        pos: saleData.paymentType === 'pos' ? totalAmount : 0,
+        balans: saleData.paymentType === 'balans' ? totalAmount : 0,
+        borc: saleData.paymentType === 'borc' ? totalAmount : 0,
+      };
+    }
+
+    const activeChannels = (['naqd', 'kart', 'pos', 'balans', 'borc'] as const).filter(
+      k => resolvedSplit[k] > 0
+    );
+    const effectivePaymentType: Sale['paymentType'] =
+      activeChannels.length > 1 ? 'qarisik' : activeChannels[0] || saleData.paymentType;
+
+    const cleanDebtorName = (saleData.debtorName || '').trim();
+    const cleanDebtorPhone = saleData.debtorPhone?.trim() || undefined;
+
+    if (resolvedSplit.borc > 0 && !cleanDebtorName) {
+      return { success: false, error: 'Nisyə (borc) satış üçün müştərinin adı və soyadı mütləqdir!' };
     }
 
     const date = (saleData.customDate || getTodayISODate()).split('T')[0];
@@ -2111,25 +2174,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const nowIso = new Date().toISOString();
     const saleId = `sale-${nowTs}`;
 
-    // If payment type is 'balans', check customer account and deduct funds
-    if (saleData.paymentType === 'balans') {
-      const custName = (saleData.debtorName || '').trim();
-      if (!custName) {
-        return { success: false, error: 'Müştəri hesabı seçilməyib!' };
+    if (resolvedSplit.balans > 0) {
+      if (!cleanDebtorName) {
+        return { success: false, error: 'Balansdan ödəniş üçün müştəri hesabı seçilməyib!' };
       }
-      const existing = customerAccounts.find(c => c.name.toLowerCase() === custName.toLowerCase());
+      const existing = customerAccounts.find(
+        c => c.name.trim().toLowerCase() === cleanDebtorName.toLowerCase()
+      );
       if (!existing) {
-        return { success: false, error: `"${custName}" adlı müştəri hesabı tapılmadı!` };
+        return { success: false, error: `"${cleanDebtorName}" adlı müştəri hesabı tapılmadı!` };
       }
-      if (existing.balance < totalAmount) {
+      if (existing.balance + 0.001 < resolvedSplit.balans) {
         return {
           success: false,
-          error: `Balansda kifayət qədər vəsait yoxdur! Cari balans: ${existing.balance.toFixed(2)} AZN, Tələb olunan: ${totalAmount.toFixed(2)} AZN`,
+          error: `Balansda kifayət qədər vəsait yoxdur! Cari balans: ${existing.balance.toFixed(2)} AZN, Tələb olunan: ${resolvedSplit.balans.toFixed(2)} AZN`,
         };
       }
       chargeCustomerBalance(
-        custName,
-        totalAmount,
+        existing.name,
+        resolvedSplit.balans,
         resolvedItems.map(i => `${i.productName} × ${i.quantity}`).join(', '),
         saleId,
         date,
@@ -2140,13 +2203,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     lastSaleGuardRef.current = { sig: saleSig, ts: nowTs };
 
-    // Credit sales & Balance product withdrawals are immediately confirmed so stock & reports reflect right away
     const isConfirmed =
-      saleData.paymentType === 'borc' || saleData.paymentType === 'balans'
-        ? true
-        : settings.autoConfirmSales;
-    const cleanDebtorName = saleData.debtorName?.trim() || undefined;
-    const cleanDebtorPhone = saleData.debtorPhone?.trim() || undefined;
+      resolvedSplit.borc > 0 || resolvedSplit.balans > 0 ? true : settings.autoConfirmSales;
+    const actor = currentUser?.username || 'isci';
 
     const newSale: Sale = {
       id: saleId,
@@ -2156,28 +2215,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       subtotalAmount,
       discountAmount,
       totalAmount,
-      paymentType: saleData.paymentType,
-      debtorName:
-        saleData.paymentType === 'borc'
-          ? (cleanDebtorName || 'Adsız borclu')
-          : saleData.paymentType === 'balans'
-          ? (cleanDebtorName || 'Müştəri')
+      paymentType: effectivePaymentType,
+      paymentSplit:
+        effectivePaymentType === 'qarisik' || resolvedSplit.borc > 0
+          ? resolvedSplit
           : undefined,
-      debtorPhone: saleData.paymentType === 'borc' ? cleanDebtorPhone : undefined,
+      debtorName:
+        resolvedSplit.borc > 0 || resolvedSplit.balans > 0
+          ? cleanDebtorName || 'Müştəri'
+          : cleanDebtorName || undefined,
+      debtorPhone: resolvedSplit.borc > 0 ? cleanDebtorPhone : undefined,
       originalDate: date,
       isConfirmed,
       confirmedAt: isConfirmed ? nowIso : undefined,
-      confirmedBy: isConfirmed ? (currentUser?.username || 'sistem') : undefined,
+      confirmedBy: isConfirmed ? actor : undefined,
+      isCancelled: false,
+      editHistory: [
+        {
+          timestamp: nowIso,
+          editedBy: actor,
+          action: 'created',
+          details: `Satış yaradıldı (${totalAmount.toFixed(2)} ₼)`,
+        },
+      ],
       createdAt: nowIso,
-      createdBy: currentUser?.username || 'isci',
+      createdBy: actor,
     };
 
     const updatedSales = [newSale, ...sales];
     setSales(updatedSales);
 
-    // If payment type is BORC, automatically create a DebtRecord linked to this Sale
+    // Automatically create a DebtRecord when borc > 0 (preserving upfront partial payments without double counting!)
     let createdDebt: DebtRecord | null = null;
-    if (saleData.paymentType === 'borc' && cleanDebtorName) {
+    if (resolvedSplit.borc > 0 && cleanDebtorName) {
+      const upfrontPayments: DebtPayment[] = [];
+      let pSeq = 1;
+      for (const methodKey of ['naqd', 'kart', 'pos'] as const) {
+        const partAmt = resolvedSplit[methodKey];
+        if (partAmt > 0) {
+          upfrontPayments.push({
+            id: `pay-upfront-${nowTs}-${pSeq++}`,
+            debtId: `debt-${nowTs}`,
+            date,
+            paidAt: date,
+            amount: partAmt,
+            paymentMethod: methodKey,
+            receivedBy: actor,
+            note: 'Satış zamanı ilkin ödəniş',
+            isUpfront: true,
+            createdAt: nowIso,
+          });
+        }
+      }
+
+      const upfrontPaidTotal = round2(
+        resolvedSplit.naqd + resolvedSplit.kart + resolvedSplit.pos
+      );
+      const debtTotal = round2(resolvedSplit.borc + upfrontPaidTotal);
+      const debtStatus: DebtRecord['status'] = upfrontPaidTotal > 0 ? 'qismen' : 'borcdadir';
+
       createdDebt = {
         id: `debt-${nowTs}`,
         debtorName: cleanDebtorName,
@@ -2187,25 +2283,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           quantity: i.quantity,
           unitPrice: i.unitPrice,
         })),
-        totalAmount,
-        paidAmount: 0,
-        remainingAmount: totalAmount,
+        totalAmount: debtTotal,
+        paidAmount: upfrontPaidTotal,
+        remainingAmount: resolvedSplit.borc,
         date,
-        status: 'borcdadir',
+        status: debtStatus,
         saleId,
-        notes: discountAmount > 0 ? `Endirim tətbiq edilib: ${discountAmount.toFixed(2)} AZN` : undefined,
-        payments: [],
+        notes:
+          upfrontPaidTotal > 0
+            ? `Qismən ilkin ödənişli satış (${upfrontPaidTotal.toFixed(2)} ₼ ödənilib, ${resolvedSplit.borc.toFixed(2)} ₼ borc qalıb)`
+            : discountAmount > 0
+            ? `Endirim tətbiq edilib: ${discountAmount.toFixed(2)} AZN`
+            : undefined,
+        payments: upfrontPayments,
+        isCancelled: false,
         createdAt: nowIso,
         updatedAt: nowIso,
       };
       const nextDebts = [createdDebt, ...debts];
       setDebts(nextDebts);
       syncDailyReportsForDates([date], updatedSales, nextDebts);
-    } else if (isConfirmed && saleData.paymentType !== 'balans') {
+
+      const supabase = getSupabaseClient();
+      if (supabase && upfrontPayments.length > 0) {
+        for (const up of upfrontPayments) {
+          safeDbExec(supabase.from('debt_payments').insert(mapDebtPaymentToDB({ ...up, debtId: createdDebt.id })));
+        }
+      }
+    } else if (isConfirmed && (resolvedSplit.naqd + resolvedSplit.kart + resolvedSplit.pos > 0)) {
       syncDailyReportsForDates([date], updatedSales, debts);
     }
 
-    // CHECK STOCK & TRIGGER BROWSER PUSH NOTIFICATION IF STOCK <= THRESHOLD!
     if (settings.enablePushNotifications) {
       for (const item of resolvedItems) {
         const prod = products.find(p => p.id === item.productId);
@@ -2222,7 +2330,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     addAuditLog(
       'Yeni Satış',
-      `Tarix: ${date} | Məbləğ: ${totalAmount.toFixed(2)} AZN${discountAmount > 0 ? ` (Endirim: ${discountAmount.toFixed(2)} AZN)` : ''}, Ödəniş: ${saleData.paymentType.toUpperCase()}${cleanDebtorName ? `, Müştəri: ${cleanDebtorName}` : ''}`
+      `Tarix: ${date} | Məbləğ: ${totalAmount.toFixed(2)} AZN${discountAmount > 0 ? ` (Endirim: ${discountAmount.toFixed(2)} AZN)` : ''}, Ödəniş: ${formatSalePaymentLabel(newSale)}${cleanDebtorName ? `, Müştəri: ${cleanDebtorName}` : ''}`
     );
 
     upsertSaleSafe(newSale, false);
@@ -2255,6 +2363,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     const nowIso = new Date().toISOString();
+    const editEntry: SaleEditEntry = {
+      timestamp: nowIso,
+      editedBy: currentUser?.username || 'admin',
+      action: 'date_changed',
+      details: `${oldDate} (${target.time}) → ${cleanNewDate} (${targetTime})`,
+    };
     const updatedSale: Sale = {
       ...target,
       date: cleanNewDate,
@@ -2262,14 +2376,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       originalDate: target.originalDate || oldDate,
       dateChangedAt: oldDate !== cleanNewDate ? nowIso : target.dateChangedAt,
       updatedAt: nowIso,
+      editHistory: [...(target.editHistory || []), editEntry],
     };
 
     const nextSales = sales.map(s => (s.id === saleId ? updatedSale : s));
     setSales(nextSales);
 
-    // If credit sale has linked DebtRecord, move its creation/report date cleanly without modifying payments
     let nextDebts = debts;
-    const linkedDebt = debts.find(d => d.saleId === saleId);
+    const linkedDebt = debts.find(d => d.saleId === saleId && !d.isCancelled);
     if (linkedDebt && oldDate !== cleanNewDate) {
       const updatedDebt: DebtRecord = {
         ...linkedDebt,
@@ -2295,7 +2409,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const confirmSale = (saleId: string) => {
     const target = sales.find(s => s.id === saleId);
-    if (!target) return;
+    if (!target || target.isCancelled) return;
 
     const updatedSale: Sale = {
       ...target,
@@ -2327,7 +2441,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const confirmDaySales = (date: string) => {
     const supabase = getSupabaseClient();
     const nextSales = sales.map(s => {
-      if (s.date === date && !s.isConfirmed) {
+      if (s.date === date && !s.isConfirmed && !s.isCancelled) {
         const updated: Sale = {
           ...s,
           isConfirmed: true,
@@ -2355,39 +2469,116 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addAuditLog('Günlük Satışlar Təsdiqləndi', `${date} tarixinə aid satışlar təsdiqləndi.`);
   };
 
-  // Yalnız Admin satışları silə bilər (İşçi Admin məlumatlarını silə bilməz)
-  const deleteSale = (saleId: string) => {
+  // Satış tarixçəsini silmədən ləğv et (anbar stokunu bərpa edir, hesabatlardan çıxarır, ləğv tarixçəsini saxlayır)
+  const cancelSale = (saleId: string, reason?: string): { success: boolean; error?: string } => {
     if (currentUser?.role !== 'admin') {
-      showToast('error', 'İcazə yoxdur: Yalnız Admin satışları silə bilər!');
-      return;
+      const msg = 'İcazə yoxdur: Yalnız Admin satışları ləğv edə bilər!';
+      showToast('error', msg);
+      return { success: false, error: msg };
     }
     const targetSale = sales.find(x => x.id === saleId);
-    const nextSales = sales.filter(x => x.id !== saleId);
-    setSales(nextSales);
+    if (!targetSale) {
+      return { success: false, error: 'Satış qeydi tapılmadı.' };
+    }
+    if (targetSale.isCancelled) {
+      return { success: false, error: 'Bu satış artıq ləğv edilib.' };
+    }
 
-    // If an unpaid credit sale is deleted, also remove its linked unpaid debt record to stay consistent
-    let nextDebts = debts;
-    const linkedUnpaidDebt = debts.find(
-      d => d.saleId === saleId && (Number(d.paidAmount) || 0) === 0
-    );
-    const supabase = getSupabaseClient();
-    if (linkedUnpaidDebt) {
-      nextDebts = debts.filter(d => d.id !== linkedUnpaidDebt.id);
-      setDebts(nextDebts);
-      if (supabase) {
-        safeDbExec(supabase.from('debts').delete().eq('id', linkedUnpaidDebt.id));
+    const nowIso = new Date().toISOString();
+    const actor = currentUser.username;
+    const cleanReason = reason?.trim() || 'Satış ləğv edildi';
+    const split = resolveSalePaymentSplit(targetSale);
+
+    const cancelEntry: SaleEditEntry = {
+      timestamp: nowIso,
+      editedBy: actor,
+      action: 'cancelled',
+      details: cleanReason,
+    };
+
+    const cancelledSale: Sale = {
+      ...targetSale,
+      isCancelled: true,
+      cancelledAt: nowIso,
+      cancelledBy: actor,
+      cancelReason: cleanReason,
+      updatedAt: nowIso,
+      editHistory: [...(targetSale.editHistory || []), cancelEntry],
+    };
+
+    const nextSales = sales.map(x => (x.id === saleId ? cancelledSale : x));
+    setSales(nextSales);
+    upsertSaleSafe(cancelledSale, true);
+
+    // Refund balance portion if customer balance was charged
+    if (split.balans > 0 && targetSale.debtorName) {
+      const cust = customerAccounts.find(
+        c => c.name.trim().toLowerCase() === targetSale.debtorName!.trim().toLowerCase()
+      );
+      if (cust) {
+        const round2 = (v: number) => Math.round(v * 100) / 100;
+        const balAfter = round2(cust.balance + split.balans);
+        const refundTx: CustomerTransaction = {
+          id: `ctx-refund-${Date.now()}`,
+          customerId: cust.id,
+          customerName: cust.name,
+          type: 'adjustment',
+          amount: split.balans,
+          balanceBefore: cust.balance,
+          balanceAfter: balAfter,
+          adjustmentDirection: 'increase',
+          date: getTodayISODate(),
+          time: getCurrentTimeHHMM(),
+          note: `Ləğv edilən satışdan balans geri qaytarması (#${saleId})`,
+          saleId,
+          createdBy: actor,
+          createdAt: nowIso,
+        };
+        const updatedAcc: CustomerAccount = {
+          ...cust,
+          balance: balAfter,
+          totalSpent: Math.max(0, round2(cust.totalSpent - split.balans)),
+          transactions: [refundTx, ...(cust.transactions || [])],
+          updatedAt: nowIso,
+          updatedBy: actor,
+        };
+        setCustomerAccounts(prev => prev.map(c => (c.id === cust.id ? updatedAcc : c)));
+        upsertCustomerAccountSafe(updatedAcc, true);
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          safeDbExec(supabase.from('customer_balance_transactions').insert(mapCustomerBalanceTxToDB(refundTx, cust.id, cust.name)));
+        }
       }
     }
 
-    if (targetSale) {
-      syncDailyReportsForDates([targetSale.date], nextSales, nextDebts);
+    // Mark linked DebtRecord cancelled cleanly without destroying history
+    let nextDebts = debts;
+    const linkedDebt = debts.find(d => d.saleId === saleId && !d.isCancelled);
+    if (linkedDebt) {
+      const cancelledDebt: DebtRecord = {
+        ...linkedDebt,
+        isCancelled: true,
+        cancelledAt: nowIso,
+        cancelledBy: actor,
+        updatedAt: nowIso,
+        notes: `${linkedDebt.notes ? `${linkedDebt.notes} · ` : ''}Ləğv edilib: ${cleanReason}`,
+      };
+      nextDebts = debts.map(d => (d.id === linkedDebt.id ? cancelledDebt : d));
+      setDebts(nextDebts);
+      upsertDebtSafe(cancelledDebt, true);
     }
-    addAuditLog('Satış Silindi', `Satış ID: ${saleId} silindi və anbar qalığı bərpa edildi.`);
 
-    if (supabase) {
-      safeDbExec(supabase.from('sales').delete().eq('id', saleId));
-    }
-    showToast('info', 'Satış ləğv edildi və məhsul stoku bərpa olundu.');
+    syncDailyReportsForDates([targetSale.date], nextSales, nextDebts);
+    addAuditLog(
+      'Satış Ləğv Edildi',
+      `Satış ID: ${saleId} (${targetSale.totalAmount.toFixed(2)} AZN) ləğv edildi · Səbəb: ${cleanReason} · Stok bərpa edildi.`
+    );
+    showToast('info', 'Satış ləğv edildi, tarixçədə saxlanıldı və məhsul stoku bərpa olundu.');
+    return { success: true };
+  };
+
+  const deleteSale = (saleId: string) => {
+    void cancelSale(saleId, 'Admin tərəfindən ləğv edildi');
   };
 
   const addDebt = (
@@ -2443,13 +2634,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           subtotalAmount: Math.round(prod.salePrice * qty * 100) / 100,
           discountAmount: Math.max(0, Math.round((prod.salePrice * qty - total) * 100) / 100),
           totalAmount: total,
-          paymentType: 'borc',
+          paymentType: paid > 0 && remaining > 0 ? 'qarisik' : 'borc',
+          paymentSplit: paid > 0 && remaining > 0 ? { naqd: paid, borc: remaining } : undefined,
           debtorName: cleanName,
           debtorPhone: cleanPhone,
           originalDate: cleanDate,
           isConfirmed: true,
           confirmedAt: nowIso,
           confirmedBy: currentUser?.username || 'admin',
+          isCancelled: false,
           createdAt: nowIso,
           createdBy: currentUser?.username || 'admin',
         };
@@ -2468,7 +2661,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               amount: paid,
               paymentMethod: 'naqd',
               receivedBy: currentUser?.username || 'admin',
-              note: 'İlkin ödəniş',
+              note: linkedSale ? 'Satış zamanı ilkin ödəniş' : 'İlkin ödəniş',
+              isUpfront: Boolean(linkedSale),
               createdAt: nowIso,
             },
           ]
@@ -2702,12 +2896,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }) => {
     const total = Math.round((Number(report.cashAmount) + Number(report.cardAmount) + Number(report.posAmount)) * 100) / 100;
     const daySales = sales.filter(
-      s => s.date === report.date && s.isConfirmed && s.paymentType !== 'borc' && s.paymentType !== 'balans'
+      s => s.date === report.date && !s.isCancelled && s.isConfirmed
     );
-    const salesTotal = daySales.reduce((sum, s) => sum + s.totalAmount, 0);
+    const salesTotal = daySales.reduce((sum, s) => {
+      const split = resolveSalePaymentSplit(s);
+      return sum + split.naqd + split.kart + split.pos;
+    }, 0);
     const debtCollectedTotal = debts
+      .filter(d => !d.isCancelled)
       .flatMap(d => d.payments || [])
-      .filter(p => (p.paidAt || p.date || '').split('T')[0] === report.date)
+      .filter(p => !p.isUpfront && (p.paidAt || p.date || '').split('T')[0] === report.date)
       .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
 
     const expectedTotal = salesTotal + debtCollectedTotal;
@@ -2945,6 +3143,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateSaleDate,
         confirmSale,
         confirmDaySales,
+        cancelSale,
         deleteSale,
         debts,
         addDebt,
