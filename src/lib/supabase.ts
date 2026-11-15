@@ -633,7 +633,7 @@ export function applyAppSettingsRows(
   return {
     barName: map.app_name !== undefined && map.app_name !== '' ? map.app_name : fallback.barName,
     logoUrl: map.logo_url !== undefined ? map.logo_url || undefined : fallback.logoUrl,
-    primaryColor: map.primary_color || fallback.primaryColor || '#dc2626',
+    primaryColor: map.primary_color || fallback.primaryColor || '#E32636',
     logoSize,
     minStockThreshold:
       map.min_stock_threshold !== undefined
@@ -654,7 +654,7 @@ export function serializeSettingsToKV(s: AppSettings): { key: string; value: str
   return [
     { key: 'app_name', value: s.barName || 'Zal Barı' },
     { key: 'logo_url', value: s.logoUrl || '' },
-    { key: 'primary_color', value: s.primaryColor || '#dc2626' },
+    { key: 'primary_color', value: s.primaryColor || '#E32636' },
     { key: 'logo_size', value: s.logoSize || 'md' },
     { key: 'min_stock_threshold', value: String(s.minStockThreshold ?? 5) },
     { key: 'auto_confirm_sales', value: String(Boolean(s.autoConfirmSales)) },

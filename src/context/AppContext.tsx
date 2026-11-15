@@ -843,7 +843,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     saveToDualStorage('settings', settings);
-    const primary = settings.primaryColor || '#dc2626';
+    const primary = settings.primaryColor || '#E32636';
     if (typeof document !== 'undefined') {
       document.documentElement.style.setProperty('--app-primary', primary);
       document.documentElement.style.setProperty('--app-primary-soft', `${primary}22`);

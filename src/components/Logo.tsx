@@ -14,9 +14,9 @@ export interface LogoProps {
 }
 
 const SIZE_MAP: Record<LogoSize, { box: string; icon: string; title: string }> = {
-  sm: { box: 'w-8 h-8 rounded-lg', icon: 'w-4 h-4', title: 'text-sm' },
-  md: { box: 'w-10 h-10 rounded-xl', icon: 'w-5 h-5', title: 'text-base' },
-  lg: { box: 'w-12 h-12 rounded-2xl', icon: 'w-6 h-6', title: 'text-lg' },
+  sm: { box: 'w-8 h-8 rounded-[10px]', icon: 'w-4 h-4', title: 'text-sm' },
+  md: { box: 'w-10 h-10 rounded-[12px]', icon: 'w-5 h-5', title: 'text-base' },
+  lg: { box: 'w-12 h-12 rounded-[14px]', icon: 'w-6 h-6', title: 'text-lg' },
 };
 
 export const Logo: React.FC<LogoProps> = ({
@@ -36,7 +36,7 @@ export const Logo: React.FC<LogoProps> = ({
   const logoUrl = previewLogoUrl !== undefined ? previewLogoUrl || undefined : settingLogoUrl;
   const appName = previewAppName !== undefined ? previewAppName : settingAppName;
   const logoSize = sizeOverride || settingLogoSize || 'md';
-  const primaryColor = previewPrimaryColor || settingPrimaryColor || '#dc2626';
+  const primaryColor = previewPrimaryColor || settingPrimaryColor || '#E32636';
 
   const [imgError, setImgError] = useState(false);
 
@@ -46,17 +46,17 @@ export const Logo: React.FC<LogoProps> = ({
 
   const sizeTokens =
     variant === 'compact'
-      ? { box: 'w-7 h-7 rounded-lg', icon: 'w-3.5 h-3.5', title: 'text-xs' }
+      ? { box: 'w-7 h-7 rounded-[8px]', icon: 'w-3.5 h-3.5', title: 'text-xs' }
       : SIZE_MAP[logoSize] || SIZE_MAP.md;
 
   const iconBox = isLoading && !previewLogoUrl ? (
     <div
-      className={`${sizeTokens.box} bg-zinc-200 dark:bg-zinc-800 animate-pulse shrink-0`}
+      className={`${sizeTokens.box} bg-[#E5E5E5] dark:bg-[#222222] animate-pulse shrink-0`}
       aria-label="Loqo yüklənir"
     />
   ) : logoUrl && !imgError ? (
     <div
-      className={`${sizeTokens.box} bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center overflow-hidden shrink-0 shadow-sm`}
+      className={`${sizeTokens.box} bg-white dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] flex items-center justify-center overflow-hidden shrink-0 shadow-xs`}
     >
       <img
         src={logoUrl}
@@ -68,7 +68,7 @@ export const Logo: React.FC<LogoProps> = ({
   ) : (
     <div
       style={{ backgroundColor: primaryColor }}
-      className={`${sizeTokens.box} text-white flex items-center justify-center font-bold overflow-hidden shrink-0 shadow-sm`}
+      className={`${sizeTokens.box} text-white flex items-center justify-center font-bold overflow-hidden shrink-0 shadow-xs`}
     >
       <Dumbbell className={`${sizeTokens.icon} stroke-[2.2]`} />
     </div>
@@ -83,15 +83,12 @@ export const Logo: React.FC<LogoProps> = ({
       {iconBox}
       <div className="min-w-0">
         <div
-          className={`${sizeTokens.title} font-extrabold text-zinc-900 dark:text-white tracking-tight leading-tight truncate`}
+          className={`${sizeTokens.title} font-bold text-[#171717] dark:text-white tracking-tight leading-tight truncate`}
         >
           {appName}
         </div>
         {variant === 'lockup' && subtitle && (
-          <div
-            style={{ color: primaryColor }}
-            className="text-[11px] font-semibold leading-tight truncate"
-          >
+          <div className="text-[11px] font-medium text-[#888888] leading-tight truncate">
             {subtitle}
           </div>
         )}

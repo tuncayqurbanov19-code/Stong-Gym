@@ -32,7 +32,7 @@ export function useSetting(key: SettingKey): UseSettingResult<unknown> {
         return settings.logoUrl;
       case 'primary_color':
       case 'primaryColor':
-        return settings.primaryColor || '#dc2626';
+        return settings.primaryColor || '#E32636';
       case 'logo_size':
       case 'logoSize':
         return settings.logoSize || 'md';

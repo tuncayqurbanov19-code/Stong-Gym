@@ -155,7 +155,7 @@ function ensureHttpManifestLink(version: string): void {
 export async function updateBrowserBranding(
   logoUrl: string | null | undefined,
   appName: string = 'Zal Barı',
-  primaryColor: string = '#dc2626'
+  primaryColor: string = '#E32636'
 ): Promise<void> {
   if (typeof window === 'undefined' || typeof document === 'undefined') return;
 

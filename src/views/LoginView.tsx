@@ -10,7 +10,7 @@ export const LoginView: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const primaryColor = settings.primaryColor || '#dc2626';
+  const primaryColor = settings.primaryColor || '#E32636';
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,35 +40,45 @@ export const LoginView: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-zinc-100 dark:bg-gradient-to-br dark:from-black dark:via-zinc-950 dark:to-zinc-900 text-zinc-900 dark:text-white transition-colors relative">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-[#F5F5F5] dark:bg-[#111111] text-[#171717] dark:text-white transition-colors duration-150 relative">
+      {/* Subtle red top accent bar */}
+      <div
+        style={{ backgroundColor: primaryColor }}
+        className="fixed top-0 left-0 right-0 h-1 z-20"
+      />
+
       {/* Theme Toggle on Login */}
       <button
         type="button"
         onClick={toggleTheme}
         aria-label="Rejimi dəyiş"
-        className="absolute top-4 right-4 p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-300 shadow-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+        className="absolute top-4 right-4 p-2.5 rounded-[10px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] text-[#525252] dark:text-zinc-300 shadow-xs hover:bg-[#FAFAFA] dark:hover:bg-[#222222] transition-colors"
       >
-        {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4 text-zinc-700" />}
+        {theme === 'dark' ? (
+          <Sun className="w-4 h-4 text-amber-400" />
+        ) : (
+          <Moon className="w-4 h-4 text-[#171717]" />
+        )}
       </button>
 
-      <div className="w-full max-w-md bg-white dark:bg-zinc-900/90 rounded-3xl shadow-xl dark:shadow-2xl border border-zinc-200 dark:border-zinc-800 p-8 space-y-6 backdrop-blur-md">
+      <div className="w-full max-w-md bg-white dark:bg-[#171717] rounded-[14px] shadow-lg dark:shadow-2xl border border-[#E5E5E5] dark:border-[#262626] p-7 sm:p-8 space-y-6">
         {/* Brand header */}
         <div className="text-center space-y-2.5">
           <div className="flex justify-center">
             <Logo variant="icon" sizeOverride="lg" />
           </div>
-          <h1 className="text-2xl font-black text-zinc-900 dark:text-white tracking-tight">
+          <h1 className="text-2xl font-bold text-[#171717] dark:text-white tracking-tight">
             {settings.barName}
           </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs text-[#888888]">
             İdman Zalı Barı İdarəetmə və Satış Sistemi
           </p>
         </div>
 
         {/* Error Alert */}
         {error && (
-          <div className="p-3.5 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+          <div className="p-3 rounded-[10px] bg-[#E32636]/10 border border-[#E32636]/30 text-[#E32636] text-xs flex items-center gap-2 font-medium">
+            <AlertCircle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
           </div>
         )}
@@ -76,39 +86,39 @@ export const LoginView: React.FC = () => {
         {/* Login Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
+            <label className="block text-[11px] font-semibold text-[#525252] dark:text-[#A3A3A3] uppercase tracking-wider mb-1.5">
               İstifadəçi Adı
             </label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-400 dark:text-zinc-500">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#888888]">
                 <User className="w-4 h-4" />
               </div>
               <input
                 type="text"
                 autoComplete="username"
                 value={username}
-                onChange={e => setUsername(e.target.value)}
-                placeholder="İstifadəçi adı (məs: admin və ya isci)"
-                className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500 transition-all placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="admin və ya isci"
+                className="w-full pl-10 pr-4 py-2.5 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]/30 focus:border-[#E32636] transition-all placeholder:text-[#888888]"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
+            <label className="block text-[11px] font-semibold text-[#525252] dark:text-[#A3A3A3] uppercase tracking-wider mb-1.5">
               Şifrə
             </label>
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-400 dark:text-zinc-500">
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#888888]">
                 <Lock className="w-4 h-4" />
               </div>
               <input
                 type="password"
                 autoComplete="current-password"
                 value={password}
-                onChange={e => setPassword(e.target.value)}
+                onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500 transition-all placeholder:text-zinc-400 dark:placeholder:text-zinc-600"
+                className="w-full pl-10 pr-4 py-2.5 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]/30 focus:border-[#E32636] transition-all placeholder:text-[#888888]"
               />
             </div>
           </div>
@@ -116,7 +126,7 @@ export const LoginView: React.FC = () => {
           <button
             type="submit"
             style={{ backgroundColor: primaryColor }}
-            className="w-full py-3 px-4 hover:opacity-95 text-white font-bold text-sm rounded-xl transition-all shadow-md active:scale-[0.98] flex items-center justify-center gap-2 mt-2"
+            className="w-full py-2.5 px-4 hover:opacity-95 text-white font-semibold text-sm rounded-[10px] transition-all shadow-sm active:scale-[0.99] flex items-center justify-center gap-2 mt-2"
           >
             <span>Daxil Ol</span>
             <ArrowRight className="w-4 h-4" />
@@ -124,39 +134,39 @@ export const LoginView: React.FC = () => {
         </form>
 
         {/* Quick Demo Credentials */}
-        <div className="pt-4 border-t border-zinc-200 dark:border-zinc-800 space-y-2.5">
-          <p className="text-[11px] font-semibold text-zinc-500 text-center uppercase tracking-wider">
-            Sürətli Giriş (Nümunə Hesablar)
+        <div className="pt-4 border-t border-[#E5E5E5] dark:border-[#262626] space-y-2.5">
+          <p className="text-[10px] font-semibold text-[#888888] text-center uppercase tracking-wider">
+            Sürətli Giriş
           </p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2.5">
             <button
               type="button"
               onClick={() => handleQuickLogin('admin', 'admin2025')}
-              className="p-2.5 bg-zinc-50 dark:bg-zinc-950 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-xl transition-colors text-left flex items-center gap-2"
+              className="p-2.5 bg-[#F5F5F5] dark:bg-[#222222] hover:bg-[#EBEBEB] dark:hover:bg-[#2A2A2A] border border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-white rounded-[10px] transition-colors text-left flex items-center gap-2"
             >
-              <ShieldCheck className="w-4 h-4 text-red-500 shrink-0" />
+              <ShieldCheck className="w-4 h-4 text-[#E32636] shrink-0" />
               <div className="truncate">
-                <div className="text-xs font-bold truncate">Admin Girişi</div>
-                <div className="text-[10px] text-zinc-500 truncate">admin / admin2025</div>
+                <div className="text-xs font-semibold truncate">Admin</div>
+                <div className="text-[10px] font-mono text-[#888888] truncate">admin2025</div>
               </div>
             </button>
 
             <button
               type="button"
               onClick={() => handleQuickLogin('isci', 'isci123')}
-              className="p-2.5 bg-zinc-50 dark:bg-zinc-950 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-xl transition-colors text-left flex items-center gap-2"
+              className="p-2.5 bg-[#F5F5F5] dark:bg-[#222222] hover:bg-[#EBEBEB] dark:hover:bg-[#2A2A2A] border border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-white rounded-[10px] transition-colors text-left flex items-center gap-2"
             >
-              <UserCheck className="w-4 h-4 text-blue-500 shrink-0" />
+              <UserCheck className="w-4 h-4 text-emerald-500 shrink-0" />
               <div className="truncate">
-                <div className="text-xs font-bold truncate">İşçi Girişi</div>
-                <div className="text-[10px] text-zinc-500 truncate">isci / isci123</div>
+                <div className="text-xs font-semibold truncate">İşçi</div>
+                <div className="text-[10px] font-mono text-[#888888] truncate">isci123</div>
               </div>
             </button>
           </div>
         </div>
 
         {/* PWA Home Screen Installation trigger */}
-        <div className="pt-2">
+        <div className="pt-1">
           <PWAInstallButton variant="full" />
         </div>
       </div>

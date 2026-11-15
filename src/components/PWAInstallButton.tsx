@@ -15,9 +15,9 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'c
   if (isInstalled) {
     if (variant === 'full') {
       return (
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-500/30 text-emerald-700 dark:text-emerald-400 text-xs font-semibold">
-          <CheckCircle className="w-4 h-4" />
-          <span>Ana ekrana quraşdırılıb (Tətbiq Rejimi)</span>
+        <div className="flex items-center gap-2 px-3 py-2 rounded-[10px] bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 text-xs font-semibold">
+          <CheckCircle className="w-4 h-4 shrink-0" />
+          <span className="truncate">Tətbiq quraşdırılıb</span>
         </div>
       );
     }
@@ -35,27 +35,27 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'c
   if (variant === 'banner') {
     return (
       <>
-        <div className={`p-4 rounded-2xl bg-gradient-to-r from-zinc-50 to-white dark:from-zinc-900 dark:to-zinc-950 border border-red-200 dark:border-red-500/30 flex items-center justify-between gap-4 shadow-sm ${className}`}>
+        <div className={`p-4 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between gap-4 ${className}`}>
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-red-50 dark:bg-red-600/20 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-600/30 flex items-center justify-center flex-shrink-0">
+            <div className="w-10 h-10 rounded-[10px] bg-[#E32636]/10 text-[#E32636] border border-[#E32636]/30 flex items-center justify-center flex-shrink-0">
               <Smartphone className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-bold text-zinc-900 dark:text-white truncate">
-                {isIOS ? "iPhone Ana Ekranına Əlavə Et" : "Proqramı Telefona Quraşdır"}
+              <p className="text-sm font-semibold text-[#171717] dark:text-white truncate">
+                {isIOS ? 'iPhone Ana Ekranına Əlavə Et' : 'Proqramı Telefona Quraşdır'}
               </p>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
-                {isIOS ? "Safari vasitəsilə tətbiq kimi işə salın" : "Offline və sürətli kassa təcrübəsi"}
+              <p className="text-xs text-[#888888] truncate">
+                {isIOS ? 'Safari vasitəsilə tətbiq kimi işə salın' : 'Offline və sürətli kassa təcrübəsi'}
               </p>
             </div>
           </div>
           <button
             type="button"
             onClick={handleClick}
-            className="flex-shrink-0 px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shadow-md transition active:scale-95 flex items-center gap-1.5"
+            className="flex-shrink-0 px-3.5 py-2 rounded-[10px] bg-[#E32636] hover:bg-[#c91e2d] text-white font-semibold text-xs transition flex items-center gap-1.5"
           >
             {isInstallable ? <Download className="w-4 h-4" /> : <Smartphone className="w-4 h-4" />}
-            <span>{isIOS ? "iPhone-a Əlavə Et" : "Quraşdır"}</span>
+            <span>{isIOS ? 'Əlavə Et' : 'Quraşdır'}</span>
           </button>
         </div>
 
@@ -72,15 +72,17 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'c
       <button
         type="button"
         onClick={handleClick}
-        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition active:scale-95 ${
+        className={`inline-flex items-center gap-2 rounded-[10px] text-xs font-semibold transition-colors ${
           variant === 'full'
-            ? 'w-full justify-center bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white shadow-md py-2.5'
-            : 'bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-800 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-500/30'
+            ? 'w-full justify-center bg-[#F5F5F5] dark:bg-[#222222] hover:bg-[#EBEBEB] dark:hover:bg-[#2B2B2B] text-[#171717] dark:text-white border border-[#E5E5E5] dark:border-[#2E2E2E] py-2 px-3'
+            : 'w-9 h-9 justify-center bg-[#F5F5F5] dark:bg-[#222222] hover:bg-[#EBEBEB] dark:hover:bg-[#2B2B2B] text-[#E32636] border border-[#E5E5E5] dark:border-[#262626]'
         } ${className}`}
-        title="Proqramı iPhone və ya kompüterin ana ekranına əlavə edin"
+        title="Proqramı ana ekrana əlavə edin"
       >
-        <Smartphone className="w-3.5 h-3.5" />
-        <span>{isIOS ? "iPhone Ana Ekrana Əlavə Et" : "Ana Ekrana Əlavə Et"}</span>
+        <Smartphone className="w-4 h-4 shrink-0" />
+        {variant === 'full' && (
+          <span className="truncate">{isIOS ? 'iPhone Ana Ekrana Əlavə Et' : 'Ana Ekrana Əlavə Et'}</span>
+        )}
       </button>
 
       <IosInstallGuideModal

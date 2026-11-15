@@ -57,6 +57,7 @@ import {
 import { playAlertSound, unlockAudioContext } from '../utils/notificationUtils';
 import { InlineBarcodeCamera } from '../components/InlineBarcodeCamera';
 import { DebtWarningModal } from '../components/DebtWarningModal';
+import { TablePagination } from '../components/TablePagination';
 import { exportSalesToCSV } from '../utils/exportUtils';
 
 interface CartItem {
@@ -86,7 +87,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
   } = useApp();
 
   const isAdmin = currentUser?.role === 'admin';
-  const primaryColor = settings.primaryColor || '#dc2626';
+  const primaryColor = settings.primaryColor || '#E32636';
   const todayISO = getTodayISODate();
 
   // POS State
@@ -173,7 +174,13 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
   const [filterPaymentType, setFilterPaymentType] = useState<'all' | PaymentType>('all');
   const [showCancelledSales, setShowCancelledSales] = useState(true);
   const [historySearch, setHistorySearch] = useState('');
+  const [salesHistoryPage, setSalesHistoryPage] = useState(1);
+  const SALES_PAGE_SIZE = 15;
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonthKey());
+
+  useEffect(() => {
+    setSalesHistoryPage(1);
+  }, [filterStartDate, filterEndDate, filterProductId, filterPaymentType, showCancelledSales, historySearch]);
 
   const categories = useMemo(
     () => Array.from(new Set(products.map(p => p.category || 'Ümumi'))),
@@ -941,26 +948,26 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
   return (
     <div className="space-y-6 pb-12 max-w-7xl mx-auto">
       {/* Top Header & Sub-Navigation */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-[#E5E5E5] dark:border-[#262626]">
         <div>
-          <h2 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight">
+          <h2 className="text-xl sm:text-2xl font-bold text-[#171717] dark:text-white tracking-tight">
             Kassa & Satış İdarəetməsi
           </h2>
-          <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-0.5">
+          <p className="text-xs sm:text-sm text-[#888888] mt-0.5">
             Sürətli POS satışı, barkod skan, endirim, nisyə qeydiyyatı və əməliyyat tarixçəsi
           </p>
         </div>
 
         {/* Sub-nav tabs */}
-        <div className="flex items-center p-1 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-x-auto">
+        <div className="flex items-center p-1 bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] rounded-[12px] overflow-x-auto gap-1">
           <button
             type="button"
             onClick={() => setActiveSubTab('pos')}
             style={activeSubTab === 'pos' ? { backgroundColor: primaryColor } : undefined}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap shrink-0 ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-[8px] transition-colors duration-150 whitespace-nowrap shrink-0 ${
               activeSubTab === 'pos'
-                ? 'text-white shadow-sm'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                ? 'text-white'
+                : 'text-[#888888] hover:text-[#171717] dark:hover:text-white'
             }`}
           >
             Satış Terminalı
@@ -969,10 +976,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
             type="button"
             onClick={() => setActiveSubTab('daily')}
             style={activeSubTab === 'daily' ? { backgroundColor: primaryColor } : undefined}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap shrink-0 ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-[8px] transition-colors duration-150 whitespace-nowrap shrink-0 ${
               activeSubTab === 'daily'
-                ? 'text-white shadow-sm'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                ? 'text-white'
+                : 'text-[#888888] hover:text-[#171717] dark:hover:text-white'
             }`}
           >
             Satış Tarixçəsi ({sales.length})
@@ -981,10 +988,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
             type="button"
             onClick={() => setActiveSubTab('monthly')}
             style={activeSubTab === 'monthly' ? { backgroundColor: primaryColor } : undefined}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap shrink-0 ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-[8px] transition-colors duration-150 whitespace-nowrap shrink-0 ${
               activeSubTab === 'monthly'
-                ? 'text-white shadow-sm'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                ? 'text-white'
+                : 'text-[#888888] hover:text-[#171717] dark:hover:text-white'
             }`}
           >
             Aylıq Yığım
@@ -998,57 +1005,57 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
       {activeSubTab === 'pos' && (
         <div className="space-y-4">
           {/* Live Today Cash vs Credit Separation Strip */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
-            <div className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 block">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626]">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#888888] block">
                 Bugünkü Ümumi Satış
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-zinc-900 dark:text-white mt-0.5 block">
+              <span className="text-base font-bold font-mono tabular-nums text-[#171717] dark:text-white mt-1 block">
                 {formatAZN(todayMetrics.grossSalesTotal)}
               </span>
             </div>
 
-            <div className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626]">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
                 Nağd Satış
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-0.5 block">
+              <span className="text-base font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1 block">
                 {formatAZN(todayMetrics.cashSales)}
               </span>
             </div>
 
-            <div className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 block">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626]">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400 block">
                 Kart / POS Satış
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-blue-700 dark:text-blue-400 mt-0.5 block">
+              <span className="text-base font-bold font-mono tabular-nums text-blue-600 dark:text-blue-400 mt-1 block">
                 {formatAZN(todayMetrics.cardSales + todayMetrics.posSales)}
               </span>
             </div>
 
-            <div className="p-3 rounded-xl bg-rose-50/60 dark:bg-rose-950/25 border border-rose-200 dark:border-rose-900/60">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400 block">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E32636]/30">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#E32636] block">
                 Nisyə (Kassasız)
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-rose-700 dark:text-rose-400 mt-0.5 block">
+              <span className="text-base font-bold font-mono tabular-nums text-[#E32636] mt-1 block">
                 {formatAZN(todayMetrics.creditSales)}
               </span>
             </div>
 
-            <div className="p-3 rounded-xl bg-amber-50/60 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-900/60">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 block">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626]">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 block">
                 Borcdan Daxilolan
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-amber-700 dark:text-amber-400 mt-0.5 block">
+              <span className="text-base font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400 mt-1 block">
                 {formatAZN(todayMetrics.debtCollectedTotal)}
               </span>
             </div>
 
-            <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 block">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-emerald-500/35">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 block">
                 Faktiki Kassaya Girən
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-emerald-800 dark:text-emerald-300 mt-0.5 block">
+              <span className="text-base font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1 block">
                 {formatAZN(todayMetrics.actualDrawerInflow)}
               </span>
             </div>
@@ -1058,7 +1065,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
             {/* Left Column: Product Selection Grid */}
             <div className="lg:col-span-7 xl:col-span-8 space-y-3">
               {/* Dedicated Hardware & Manual Barcode Scanner Bar + Optional Camera Toggle Icon */}
-              <div className="p-2.5 sm:p-3 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-2.5">
+              <div className="p-3 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] space-y-2.5">
                 <div className="flex items-center gap-2">
                   <form
                     onSubmit={e => {
@@ -1070,7 +1077,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   >
                     <ScanBarcode
                       className={`w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 transition-colors ${
-                        scannerFocused ? 'text-emerald-500' : 'text-red-500'
+                        scannerFocused ? 'text-emerald-500' : 'text-[#E32636]'
                       }`}
                     />
                     <input
@@ -1103,10 +1110,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                       }}
                       placeholder="Barkod skan edin — ardıcıl oxuyur, düyməyə ehtiyac yoxdur..."
                       aria-label="Barkod skaner girişi"
-                      className={`w-full pl-10 pr-24 py-2 text-sm font-mono rounded-xl border bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 transition-all ${
+                      className={`w-full pl-10 pr-24 py-2 text-sm font-mono rounded-[10px] border bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 transition-colors duration-150 ${
                         scannerFocused
                           ? 'border-emerald-500/80 focus:ring-emerald-500'
-                          : 'border-zinc-300 dark:border-zinc-700 focus:ring-red-500'
+                          : 'border-[#E5E5E5] dark:border-[#2E2E2E] focus:ring-[#E32636]'
                       }`}
                     />
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
@@ -1118,16 +1125,16 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                             restoreScannerFocus(true);
                           }}
                           aria-label="Barkodu təmizlə"
-                          className="p-0.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-white"
+                          className="p-0.5 text-[#888888] hover:text-[#171717] dark:hover:text-white"
                         >
                           <X className="w-4 h-4" />
                         </button>
                       ) : (
                         <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-[6px] border ${
                             scannerFocused
-                              ? 'bg-emerald-50 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
-                              : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700'
+                              ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800/70'
+                              : 'bg-white dark:bg-[#171717] text-[#888888] border-[#E5E5E5] dark:border-[#2E2E2E]'
                           }`}
                         >
                           {scannerFocused ? 'Hazır' : 'Skaner'}
@@ -1156,10 +1163,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                     }
                     aria-label="Skaner fokus kilidi"
                     aria-pressed={scannerFocusLock}
-                    className={`p-2.5 sm:px-3 sm:py-2 text-xs font-bold rounded-xl border transition-colors whitespace-nowrap flex items-center gap-1.5 shrink-0 ${
+                    className={`p-2.5 sm:px-3 sm:py-2 text-xs font-semibold rounded-[10px] border transition-colors whitespace-nowrap flex items-center gap-1.5 shrink-0 ${
                       scannerFocusLock
-                        ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
-                        : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                        ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
+                        : 'bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#888888] hover:text-[#171717] dark:hover:text-white'
                     }`}
                   >
                     {scannerFocusLock ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
@@ -1178,10 +1185,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                     aria-pressed={isCameraActive}
                     title={isCameraActive ? 'Kameranı bağla' : 'Kamera ilə barkod oxut'}
                     style={isCameraActive ? { backgroundColor: primaryColor } : undefined}
-                    className={`p-2.5 rounded-xl border flex items-center justify-center shrink-0 transition-all active:scale-95 ${
+                    className={`p-2.5 rounded-[10px] border flex items-center justify-center shrink-0 transition-colors active:scale-95 ${
                       isCameraActive
-                        ? 'text-white border-transparent shadow-sm'
-                        : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                        ? 'text-white border-transparent'
+                        : 'bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-[#2a2a2a]'
                     }`}
                   >
                     {isCameraActive ? <CameraOff className="w-4 h-4" /> : <Camera className="w-4 h-4" />}
@@ -1203,15 +1210,15 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                 )}
 
                 <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                  <span className="text-zinc-500 dark:text-zinc-400">
+                  <span className="text-[#888888]">
                     USB/Bluetooth skaner daim aktivdir · eyni məhsul yenidən skan edildikdə sayı artır
                   </span>
                   {lastScanFeedback && (
                     <span
-                      className={`font-semibold px-2.5 py-0.5 rounded-lg border ${
+                      className={`font-semibold px-2.5 py-0.5 rounded-[8px] border ${
                         lastScanFeedback.status === 'success'
-                          ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
-                          : 'bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-800 text-red-700 dark:text-red-300'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800/70 text-emerald-700 dark:text-emerald-300'
+                          : 'bg-[#E32636]/10 border-[#E32636]/25 text-[#E32636]'
                       }`}
                     >
                       {lastScanFeedback.barcode}: {lastScanFeedback.message}
@@ -1223,7 +1230,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
               {/* Search row */}
               <div className="flex gap-2">
                 <div className="relative flex-1">
-                  <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" />
+                  <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[#888888]" />
                   <input
                     type="text"
                     value={searchQuery}
@@ -1272,13 +1279,13 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                       }
                     }}
                     placeholder="Məhsul adı və ya barkodla axtarın (Enter)..."
-                    className="w-full pl-10 pr-8 py-2.5 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    className="w-full pl-10 pr-8 py-2.5 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#262626] bg-white dark:bg-[#171717] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                   />
                   {searchQuery && (
                     <button
                       type="button"
                       onClick={() => setSearchQuery('')}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 dark:hover:text-white"
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#888888] hover:text-[#171717] dark:hover:text-white"
                     >
                       <X className="w-4 h-4" />
                     </button>
@@ -1292,10 +1299,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   type="button"
                   onClick={() => setSelectedCategory('all')}
                   style={selectedCategory === 'all' ? { backgroundColor: primaryColor } : undefined}
-                  className={`px-3 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap shrink-0 transition-colors ${
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-[8px] whitespace-nowrap shrink-0 transition-colors ${
                     selectedCategory === 'all'
-                      ? 'text-white font-bold'
-                      : 'bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:text-zinc-900 dark:hover:text-white'
+                      ? 'text-white'
+                      : 'bg-white dark:bg-[#171717] text-[#888888] border border-[#E5E5E5] dark:border-[#262626] hover:text-[#171717] dark:hover:text-white'
                   }`}
                 >
                   Hamısı ({products.length})
@@ -1306,10 +1313,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                     type="button"
                     onClick={() => setSelectedCategory(cat)}
                     style={selectedCategory === cat ? { backgroundColor: primaryColor } : undefined}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-xl whitespace-nowrap shrink-0 transition-colors ${
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-[8px] whitespace-nowrap shrink-0 transition-colors ${
                       selectedCategory === cat
-                        ? 'text-white font-bold'
-                        : 'bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:text-zinc-900 dark:hover:text-white'
+                        ? 'text-white'
+                        : 'bg-white dark:bg-[#171717] text-[#888888] border border-[#E5E5E5] dark:border-[#262626] hover:text-[#171717] dark:hover:text-white'
                     }`}
                   >
                     {cat}
@@ -1319,7 +1326,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
               {/* Products Grid */}
               {filteredProducts.length === 0 ? (
-                <div className="py-12 text-center bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 text-zinc-500 text-xs">
+                <div className="py-12 text-center bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] text-[#888888] text-xs">
                   Axtarışa uyğun məhsul tapılmadı.
                 </div>
               ) : (
@@ -1337,48 +1344,48 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                         key={product.id}
                         type="button"
                         onClick={() => addToCart(product)}
-                        className={`p-3.5 rounded-xl border text-left flex flex-col justify-between transition-all active:scale-[0.98] relative ${
+                        className={`p-3.5 rounded-[12px] border text-left flex flex-col justify-between transition-colors duration-150 active:scale-[0.98] relative ${
                           isOutOfStock
-                            ? 'border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950/60 opacity-60 cursor-not-allowed'
+                            ? 'border-[#E5E5E5] dark:border-[#262626] bg-[#F5F5F5] dark:bg-[#171717]/60 opacity-55 cursor-not-allowed'
                             : inCart
-                            ? 'border-red-500 bg-red-50/70 dark:bg-red-950/20 ring-1 ring-red-500'
-                            : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-zinc-300 dark:hover:border-zinc-700'
+                            ? 'border-[#E32636] bg-[#E32636]/5 dark:bg-[#E32636]/10 ring-1 ring-[#E32636]'
+                            : 'border-[#E5E5E5] dark:border-[#262626] bg-white dark:bg-[#171717] hover:border-neutral-400 dark:hover:border-[#3a3a3a]'
                         }`}
                       >
                         {inCart && (
                           <span
                             style={{ backgroundColor: primaryColor }}
-                            className="absolute -top-1.5 -right-1.5 w-6 h-6 rounded-full text-white font-black text-xs tabular-nums flex items-center justify-center shadow-md"
+                            className="absolute top-2 right-2 min-w-5 h-5 px-1.5 rounded-[6px] text-white font-bold text-[11px] font-mono tabular-nums flex items-center justify-center"
                           >
                             {inCart.quantity}
                           </span>
                         )}
 
-                        <div>
-                          <div className="flex items-center justify-between text-[11px] text-zinc-500 dark:text-zinc-400 mb-1">
+                        <div className={inCart ? 'pr-7' : undefined}>
+                          <div className="flex items-center justify-between text-[11px] text-[#888888] mb-1">
                             <span className="truncate">
                               {product.category}
                               {product.volume ? ` · ${product.volume}` : ''}
                             </span>
                           </div>
 
-                          <h4 className="text-xs sm:text-sm font-bold text-zinc-900 dark:text-white line-clamp-2 leading-snug">
+                          <h4 className="text-xs sm:text-sm font-semibold text-[#171717] dark:text-white line-clamp-2 leading-snug">
                             {product.name}
                           </h4>
                         </div>
 
-                        <div className="mt-3 pt-2 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2">
-                          <span className="text-xs sm:text-sm font-mono tabular-nums font-extrabold text-red-600 dark:text-red-400">
+                        <div className="mt-3 pt-2 border-t border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between gap-2">
+                          <span className="text-xs sm:text-sm font-mono tabular-nums font-bold text-[#E32636]">
                             {formatAZN(product.salePrice)}
                           </span>
 
                           <span
                             className={`text-[11px] font-mono tabular-nums ${
                               isOutOfStock
-                                ? 'text-red-600 dark:text-red-400 font-bold'
+                                ? 'text-[#E32636] font-semibold'
                                 : stock.isLowStock
-                                ? 'text-amber-600 dark:text-amber-400 font-bold'
-                                : 'text-zinc-500 dark:text-zinc-400'
+                                ? 'text-amber-600 dark:text-amber-400 font-semibold'
+                                : 'text-[#888888]'
                             }`}
                           >
                             {isOutOfStock ? 'Bitib (0)' : `Stok: ${stock.activeStock}`}
@@ -1392,11 +1399,11 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
             </div>
 
             {/* Right Column: Checkout Cart & Payment */}
-            <div className="lg:col-span-5 xl:col-span-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 space-y-4 sticky top-16">
-              <div className="flex items-center justify-between pb-3 border-b border-zinc-200 dark:border-zinc-800">
+            <div className="lg:col-span-5 xl:col-span-4 bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] p-5 space-y-4 sticky top-16">
+              <div className="flex items-center justify-between pb-3 border-b border-[#E5E5E5] dark:border-[#262626]">
                 <div className="flex items-center gap-2">
-                  <ShoppingCart className="w-5 h-5 text-red-500" />
-                  <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                  <ShoppingCart className="w-5 h-5 text-[#E32636]" />
+                  <h3 className="text-base font-bold text-[#171717] dark:text-white">
                     Səbət ({cartItemCount} əd.)
                   </h3>
                 </div>
@@ -1404,7 +1411,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   <button
                     type="button"
                     onClick={clearCart}
-                    className="text-xs text-red-600 dark:text-red-400 hover:underline font-semibold"
+                    className="text-xs text-[#E32636] hover:underline font-semibold"
                   >
                     Təmizlə
                   </button>
@@ -1413,28 +1420,28 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
               {/* Cart Items List */}
               {cart.length === 0 ? (
-                <div className="py-10 text-center text-zinc-500 space-y-2">
-                  <ShoppingCart className="w-8 h-8 mx-auto text-zinc-400 dark:text-zinc-600" />
+                <div className="py-10 text-center text-[#888888] space-y-2">
+                  <ShoppingCart className="w-8 h-8 mx-auto text-[#888888]/60" />
                   <p className="text-xs">Səbət boşdur. Məhsul seçin və ya barkod oxudun.</p>
                 </div>
               ) : (
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1 divide-y divide-zinc-200 dark:divide-zinc-800">
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1 divide-y divide-[#E5E5E5] dark:divide-[#262626]">
                   {cart.map(item => {
                     const isJustScanned = lastAddedProductId === item.product.id;
                     return (
                     <div
                       key={item.product.id}
-                      className={`pt-2 px-1.5 pb-1 rounded-lg flex items-center justify-between gap-2 transition-colors ${
+                      className={`pt-2 px-1.5 pb-1 rounded-[8px] flex items-center justify-between gap-2 transition-colors ${
                         isJustScanned ? 'bg-emerald-50/90 dark:bg-emerald-950/35' : ''
                       }`}
                     >
                       <div className="flex-1 min-w-0">
-                        <p className="text-xs font-bold text-zinc-900 dark:text-white truncate">
+                        <p className="text-xs font-semibold text-[#171717] dark:text-white truncate">
                           {item.product.name}
                         </p>
-                        <p className="text-[11px] font-mono tabular-nums text-zinc-500 dark:text-zinc-400">
+                        <p className="text-[11px] font-mono tabular-nums text-[#888888]">
                           {item.quantity} × {formatAZN(item.product.salePrice)} ={' '}
-                          <strong className="text-zinc-900 dark:text-white">
+                          <strong className="text-[#171717] dark:text-white">
                             {formatAZN(item.quantity * item.product.salePrice)}
                           </strong>
                         </p>
@@ -1445,18 +1452,18 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                           type="button"
                           onClick={() => updateQuantity(item.product.id, -1)}
                           aria-label="Sayını azalt"
-                          className="w-7 h-7 rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 flex items-center justify-center transition-colors"
+                          className="w-7 h-7 rounded-[8px] bg-[#F5F5F5] dark:bg-[#222222] hover:bg-neutral-200 dark:hover:bg-[#2a2a2a] text-[#171717] dark:text-neutral-200 border border-[#E5E5E5] dark:border-[#2E2E2E] flex items-center justify-center transition-colors"
                         >
                           <Minus className="w-3.5 h-3.5" />
                         </button>
-                        <span className="w-6 text-center font-mono tabular-nums font-bold text-xs text-zinc-900 dark:text-white">
+                        <span className="w-6 text-center font-mono tabular-nums font-bold text-xs text-[#171717] dark:text-white">
                           {item.quantity}
                         </span>
                         <button
                           type="button"
                           onClick={() => updateQuantity(item.product.id, 1)}
                           aria-label="Sayını artır"
-                          className="w-7 h-7 rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 flex items-center justify-center transition-colors"
+                          className="w-7 h-7 rounded-[8px] bg-[#F5F5F5] dark:bg-[#222222] hover:bg-neutral-200 dark:hover:bg-[#2a2a2a] text-[#171717] dark:text-neutral-200 border border-[#E5E5E5] dark:border-[#2E2E2E] flex items-center justify-center transition-colors"
                         >
                           <Plus className="w-3.5 h-3.5" />
                         </button>
@@ -1464,7 +1471,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                           type="button"
                           onClick={() => removeFromCart(item.product.id)}
                           aria-label="Səbətdən sil"
-                          className="w-7 h-7 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 flex items-center justify-center ml-0.5 transition-colors"
+                          className="w-7 h-7 rounded-[8px] text-[#E32636] hover:bg-[#E32636]/10 flex items-center justify-center ml-0.5 transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -1476,9 +1483,9 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
               )}
 
               {/* Discount & Total Display */}
-              <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 space-y-2.5">
+              <div className="p-3.5 rounded-[12px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] space-y-2.5">
                 <div className="flex items-center justify-between gap-2 text-xs">
-                  <span className="text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
+                  <span className="text-[#888888] flex items-center gap-1">
                     <Tag className="w-3.5 h-3.5" />
                     <span>Endirim (AZN)</span>
                   </span>
@@ -1491,13 +1498,13 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                       value={discountInput}
                       onChange={e => setDiscountInput(e.target.value)}
                       placeholder="0.00"
-                      className="w-24 px-2.5 py-1 text-right font-mono tabular-nums text-xs font-bold rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                      className="w-24 px-2.5 py-1 text-right font-mono tabular-nums text-xs font-bold rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#171717] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                     />
                   </div>
                 </div>
 
                 {cartDiscount > 0 && (
-                  <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-zinc-500 dark:text-zinc-400">
+                  <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-[#888888]">
                     <span>Ara cəm: {formatAZN(cartSubtotal)}</span>
                     <span className="text-amber-600 dark:text-amber-400 font-bold">
                       Endirim: −{formatAZN(cartDiscount)}
@@ -1505,12 +1512,12 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   </div>
                 )}
 
-                <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+                <div className="pt-2 border-t border-[#E5E5E5] dark:border-[#2E2E2E] flex items-center justify-between">
                   <div>
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-[#888888]">
                       Yekun Məbləğ
                     </span>
-                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                    <p className="text-[11px] text-[#888888]">
                       {paymentType === 'borc'
                         ? upfrontPaidNum > 0
                           ? `${formatAZN(upfrontPaidNum)} indi · ${formatAZN(borcRemainingNum)} borc`
@@ -1526,7 +1533,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                         : 'Gün sonunda təsdiqlənəcək'}
                     </p>
                   </div>
-                  <div className="text-2xl font-black font-mono tabular-nums text-zinc-900 dark:text-white">
+                  <div className="text-2xl font-bold font-mono tabular-nums text-[#171717] dark:text-white">
                     {formatAZN(cartFinalTotal)}
                   </div>
                 </div>
@@ -1534,17 +1541,17 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
               {/* Payment Method Selector (6 modes) */}
               <div className="space-y-2">
-                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">
+                <label className="block text-xs font-semibold text-[#888888] uppercase tracking-wider">
                   Ödəniş Növü
                 </label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   <button
                     type="button"
                     onClick={() => setPaymentType('naqd')}
-                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+                    className={`py-2 px-2.5 rounded-[10px] border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                       paymentType === 'naqd'
                         ? 'bg-emerald-600 text-white border-emerald-500'
-                        : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                        : 'bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-[#2a2a2a]'
                     }`}
                   >
                     <Banknote className="w-4 h-4 shrink-0" />
@@ -1554,10 +1561,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   <button
                     type="button"
                     onClick={() => setPaymentType('kart')}
-                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+                    className={`py-2 px-2.5 rounded-[10px] border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                       paymentType === 'kart'
                         ? 'bg-blue-600 text-white border-blue-500'
-                        : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                        : 'bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-[#2a2a2a]'
                     }`}
                   >
                     <CreditCard className="w-4 h-4 shrink-0" />
@@ -1567,10 +1574,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   <button
                     type="button"
                     onClick={() => setPaymentType('pos')}
-                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+                    className={`py-2 px-2.5 rounded-[10px] border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                       paymentType === 'pos'
-                        ? 'bg-red-600 text-white border-red-500'
-                        : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                        ? 'bg-[#E32636] text-white border-[#E32636]'
+                        : 'bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-[#2a2a2a]'
                     }`}
                   >
                     <Smartphone className="w-4 h-4 shrink-0" />
@@ -1580,10 +1587,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   <button
                     type="button"
                     onClick={() => setPaymentType('balans')}
-                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+                    className={`py-2 px-2.5 rounded-[10px] border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                       paymentType === 'balans'
                         ? 'bg-amber-600 text-white border-amber-500'
-                        : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                        : 'bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-[#2a2a2a]'
                     }`}
                   >
                     <Wallet className="w-4 h-4 shrink-0" />
@@ -1593,10 +1600,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   <button
                     type="button"
                     onClick={() => setPaymentType('borc')}
-                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+                    className={`py-2 px-2.5 rounded-[10px] border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                       paymentType === 'borc'
                         ? 'bg-rose-700 text-white border-rose-600'
-                        : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                        : 'bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-[#2a2a2a]'
                     }`}
                   >
                     <BookOpen className="w-4 h-4 shrink-0" />
@@ -1606,10 +1613,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   <button
                     type="button"
                     onClick={() => setPaymentType('qarisik')}
-                    className={`py-2 px-2.5 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+                    className={`py-2 px-2.5 rounded-[10px] border text-xs font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap ${
                       paymentType === 'qarisik'
                         ? 'bg-purple-700 text-white border-purple-600'
-                        : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                        : 'bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-[#2a2a2a]'
                     }`}
                   >
                     <Layers className="w-4 h-4 shrink-0" />
@@ -1620,7 +1627,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
               {/* BALANS selector */}
               {paymentType === 'balans' && (
-                <div className="space-y-3 p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-amber-300 dark:border-amber-800/60">
+                <div className="space-y-3 p-3.5 rounded-[12px] bg-[#F5F5F5] dark:bg-[#222222] border border-amber-300 dark:border-amber-800/60">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-bold text-amber-700 dark:text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
                       <Wallet className="w-3.5 h-3.5" />
@@ -1641,7 +1648,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   <select
                     value={selectedCustomerAccount}
                     onChange={e => setSelectedCustomerAccount(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white font-semibold"
+                    className="w-full px-3 py-2 text-xs rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#171717] text-[#171717] dark:text-white font-semibold"
                   >
                     <option value="">-- Müştəri Hesabı Seçin --</option>
                     {customerAccounts.map(c => (
@@ -1659,14 +1666,14 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                     const remainingAfterSale = Math.round((cust.balance - cartFinalTotal) * 100) / 100;
                     const hasEnough = remainingAfterSale >= 0;
                     return (
-                      <div className="p-2.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-1 text-xs font-mono tabular-nums">
+                      <div className="p-2.5 rounded-[10px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] space-y-1 text-xs font-mono tabular-nums">
                         <div className="flex justify-between">
-                          <span className="font-sans text-zinc-500">Cari balans:</span>
-                          <strong className="text-zinc-900 dark:text-white">{formatAZN(cust.balance)}</strong>
+                          <span className="font-sans text-[#888888]">Cari balans:</span>
+                          <strong className="text-[#171717] dark:text-white">{formatAZN(cust.balance)}</strong>
                         </div>
                         <div className="flex justify-between">
-                          <span className="font-sans text-zinc-500">Qalacaq balans:</span>
-                          <strong className={hasEnough ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}>
+                          <span className="font-sans text-[#888888]">Qalacaq balans:</span>
+                          <strong className={hasEnough ? 'text-emerald-600 dark:text-emerald-400' : 'text-[#E32636] dark:text-red-400'}>
                             {formatAZN(remainingAfterSale)}
                           </strong>
                         </div>
@@ -1678,22 +1685,22 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
               {/* BORC (Nisyə) Name, Phone & Partial Upfront Payment */}
               {paymentType === 'borc' && (
-                <div className="space-y-2.5 p-3.5 rounded-xl bg-rose-50/70 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/80">
+                <div className="space-y-2.5 p-3.5 rounded-[12px] bg-[#F5F5F5] dark:bg-[#222222] border border-red-300 dark:border-red-900/60">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-rose-700 dark:text-rose-300 uppercase tracking-wider">
+                    <span className="text-xs font-semibold text-[#E32636] dark:text-red-400 uppercase tracking-wider">
                       Borclu Məlumatları
                     </span>
-                    <span className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                    <span className="text-[11px] font-semibold text-[#E32636] dark:text-red-400">
                       Stok dərhal çıxılır
                     </span>
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                    <label className="block text-[11px] font-semibold text-[#888888] mb-1">
                       Adı və Soyadı *
                     </label>
                     <div className="relative">
-                      <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-rose-500" />
+                      <User className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#E32636]" />
                       <input
                         type="text"
                         list="known-debtors-list"
@@ -1701,7 +1708,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                         value={debtorName}
                         onChange={e => handleDebtorNameChange(e.target.value)}
                         placeholder="məs: Əli Həsənov"
-                        className="w-full pl-9 pr-3 py-2 text-sm rounded-xl border border-rose-300 dark:border-rose-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500 font-semibold"
+                        className="w-full pl-9 pr-3 py-2 text-sm rounded-[10px] border border-red-300 dark:border-red-900/70 bg-white dark:bg-[#171717] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636] font-semibold"
                       />
                       <datalist id="known-debtors-list">
                         {knownDebtors.map(k => (
@@ -1712,32 +1719,32 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                    <label className="block text-[11px] font-semibold text-[#888888] mb-1">
                       Telefon Nömrəsi
                     </label>
                     <div className="relative">
-                      <Phone className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                      <Phone className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" />
                       <input
                         type="tel"
                         value={debtorPhone}
                         onChange={e => setDebtorPhone(e.target.value)}
                         placeholder="+994 50 000 00 00"
-                        className="w-full pl-9 pr-3 py-2 text-sm font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                        className="w-full pl-9 pr-3 py-2 text-sm font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#171717] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                       />
                     </div>
                   </div>
 
                   {/* Partial upfront payment (e.g., 10 AZN sale -> 4 AZN upfront -> 6 AZN debt) */}
-                  <div className="pt-2 border-t border-rose-200 dark:border-rose-800/60 space-y-2">
+                  <div className="pt-2 border-t border-[#E5E5E5] dark:border-[#2E2E2E] space-y-2">
                     <div className="flex items-center justify-between gap-2">
-                      <label className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300">
+                      <label className="text-[11px] font-semibold text-[#888888]">
                         Öndən ödənilən məbləğ (AZN)
                       </label>
                       <select
                         value={borcUpfrontMethod}
                         onChange={e => setBorcUpfrontMethod(e.target.value as 'naqd' | 'kart' | 'pos')}
                         aria-label="İlkin ödəniş üsulu"
-                        className="px-2 py-1 text-[11px] font-bold rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                        className="px-2 py-1 text-[11px] font-semibold rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#171717] text-[#171717] dark:text-white"
                       >
                         <option value="naqd">Nağd</option>
                         <option value="kart">Kart</option>
@@ -1752,15 +1759,15 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                       value={borcUpfrontPaid}
                       onChange={e => setBorcUpfrontPaid(e.target.value)}
                       placeholder="0.00 (tam nisyə üçün boş saxlayın)"
-                      className="w-full px-3 py-1.5 text-sm font-mono tabular-nums rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-1.5 text-sm font-mono tabular-nums rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#171717] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                     />
                     <div className="flex items-center justify-between text-[11px] font-mono tabular-nums">
-                      <span className="text-zinc-500 font-sans">Kassaya daxil olan:</span>
+                      <span className="text-[#888888] font-sans">Kassaya daxil olan:</span>
                       <strong className="text-emerald-600 dark:text-emerald-400">{formatAZN(upfrontPaidNum)}</strong>
                     </div>
                     <div className="flex items-center justify-between text-[11px] font-mono tabular-nums">
-                      <span className="text-zinc-500 font-sans">Yaranacaq qalıq borc:</span>
-                      <strong className="text-rose-700 dark:text-rose-400">{formatAZN(borcRemainingNum)}</strong>
+                      <span className="text-[#888888] font-sans">Yaranacaq qalıq borc:</span>
+                      <strong className="text-[#E32636] dark:text-red-400">{formatAZN(borcRemainingNum)}</strong>
                     </div>
                   </div>
                 </div>
@@ -1768,9 +1775,9 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
               {/* QARISIQQ (Mixed Payment Split) */}
               {paymentType === 'qarisik' && (
-                <div className="space-y-2.5 p-3.5 rounded-xl bg-purple-50/60 dark:bg-purple-950/25 border border-purple-200 dark:border-purple-800/70">
+                <div className="space-y-2.5 p-3.5 rounded-[12px] bg-[#F5F5F5] dark:bg-[#222222] border border-purple-300 dark:border-purple-800/60">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-purple-800 dark:text-purple-300 uppercase tracking-wider">
+                    <span className="text-xs font-semibold text-purple-800 dark:text-purple-300 uppercase tracking-wider">
                       Qarışıq Ödəniş Bölgüsü
                     </span>
                     <span
@@ -1796,7 +1803,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                     ] as const
                   ).map(ch => (
                     <div key={ch.key} className="flex items-center gap-2">
-                      <span className="w-14 text-xs font-bold text-zinc-700 dark:text-zinc-300 shrink-0">
+                      <span className="w-14 text-xs font-semibold text-[#171717] dark:text-neutral-300 shrink-0">
                         {ch.label}
                       </span>
                       <input
@@ -1807,7 +1814,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                         onChange={e => ch.setter(e.target.value)}
                         placeholder="0.00"
                         aria-label={`Qarışıq ${ch.label}`}
-                        className="flex-1 px-2.5 py-1.5 text-xs font-mono tabular-nums rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                        className="flex-1 px-2.5 py-1.5 text-xs font-mono tabular-nums rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#171717] text-[#171717] dark:text-white"
                       />
                       {mixRemainingDelta > 0.009 && (
                         <button
@@ -1816,7 +1823,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                             const currentVal = round2(parseFloat(ch.val) || 0);
                             ch.setter(round2(currentVal + mixRemainingDelta).toFixed(2));
                           }}
-                          className="px-2 py-1 text-[10px] font-mono font-bold rounded-lg bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 whitespace-nowrap"
+                          className="px-2 py-1 text-[10px] font-mono font-bold rounded-[8px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#2E2E2E] hover:bg-neutral-100 dark:hover:bg-[#2a2a2a] text-[#171717] dark:text-neutral-200 whitespace-nowrap"
                           title="Qalan məbləği bu kanala əlavə et"
                         >
                           +{mixRemainingDelta.toFixed(2)}
@@ -1826,14 +1833,14 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   ))}
 
                   {mixSplitValues.balans > 0.009 && (
-                    <div className="pt-1.5 border-t border-purple-200 dark:border-purple-800/60">
+                    <div className="pt-1.5 border-t border-[#E5E5E5] dark:border-[#2E2E2E]">
                       <label className="block text-[11px] font-semibold text-amber-700 dark:text-amber-300 mb-1">
                         Balansdan çıxılacaq müştəri *
                       </label>
                       <select
                         value={selectedCustomerAccount}
                         onChange={e => setSelectedCustomerAccount(e.target.value)}
-                        className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white font-semibold"
+                        className="w-full px-2.5 py-1.5 text-xs rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#171717] text-[#171717] dark:text-white font-semibold"
                       >
                         <option value="">-- Müştəri Hesabı Seçin --</option>
                         {customerAccounts.map(c => (
@@ -1846,14 +1853,14 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   )}
 
                   {mixSplitValues.borc > 0.009 && (
-                    <div className="pt-1.5 border-t border-purple-200 dark:border-purple-800/60 space-y-2">
+                    <div className="pt-1.5 border-t border-[#E5E5E5] dark:border-[#2E2E2E] space-y-2">
                       <input
                         type="text"
                         list="known-debtors-list"
                         value={debtorName}
                         onChange={e => handleDebtorNameChange(e.target.value)}
                         placeholder="Borclu adı və soyadı *"
-                        className="w-full px-3 py-1.5 text-xs rounded-lg border border-rose-300 dark:border-rose-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white font-semibold"
+                        className="w-full px-3 py-1.5 text-xs rounded-[8px] border border-red-300 dark:border-red-900/70 bg-white dark:bg-[#171717] text-[#171717] dark:text-white font-semibold"
                       />
                       <datalist id="known-debtors-list">
                         {knownDebtors.map(k => (
@@ -1865,7 +1872,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                         value={debtorPhone}
                         onChange={e => setDebtorPhone(e.target.value)}
                         placeholder="Telefon (+994 50 ...)"
-                        className="w-full px-3 py-1.5 text-xs font-mono rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                        className="w-full px-3 py-1.5 text-xs font-mono rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#171717] text-[#171717] dark:text-white"
                       />
                     </div>
                   )}
@@ -1876,31 +1883,31 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
               <div className="space-y-2">
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div>
-                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium block mb-0.5">
+                    <span className="text-[10px] text-[#888888] font-medium block mb-0.5">
                       Satış Tarixi
                     </span>
                     <input
                       type="date"
                       value={customDate}
                       onChange={e => setCustomDate(e.target.value)}
-                      className="w-full px-2.5 py-1.5 font-mono tabular-nums text-xs rounded-lg border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                      className="w-full px-2.5 py-1.5 font-mono tabular-nums text-xs rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                     />
                   </div>
                   <div>
-                    <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium block mb-0.5">
+                    <span className="text-[10px] text-[#888888] font-medium block mb-0.5">
                       Saat
                     </span>
                     <input
                       type="time"
                       value={customTime}
                       onChange={e => setCustomTime(e.target.value)}
-                      className="w-full px-2.5 py-1.5 font-mono tabular-nums text-xs rounded-lg border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                      className="w-full px-2.5 py-1.5 font-mono tabular-nums text-xs rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                     />
                   </div>
                 </div>
 
                 {customDate !== todayISO && (
-                  <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 text-[11px] text-amber-800 dark:text-amber-300 flex items-center justify-between gap-2">
+                  <div className="p-2.5 rounded-[10px] bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/70 text-[11px] text-amber-800 dark:text-amber-300 flex items-center justify-between gap-2">
                     <span>
                       Fərqli tarix seçilib: yalnız <strong>{formatDateAZ(customDate)}</strong> hesabatına yazılacaq.
                     </span>
@@ -1921,10 +1928,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                 disabled={cart.length === 0 || isSubmittingSale}
                 onClick={handleCompleteSale}
                 style={cart.length > 0 ? { backgroundColor: primaryColor } : undefined}
-                className={`w-full py-3.5 px-4 font-black text-sm rounded-xl transition-all flex items-center justify-center gap-2 active:scale-[0.98] ${
+                className={`w-full py-3.5 px-4 font-bold text-sm rounded-[10px] transition-opacity duration-150 flex items-center justify-center gap-2 active:scale-[0.98] ${
                   cart.length === 0 || isSubmittingSale
-                    ? 'bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 cursor-not-allowed'
-                    : 'text-white hover:opacity-95 shadow-md'
+                    ? 'bg-[#F5F5F5] dark:bg-[#222222] text-[#888888] border border-[#E5E5E5] dark:border-[#2E2E2E] cursor-not-allowed'
+                    : 'text-white hover:opacity-95'
                 }`}
               >
                 <Check className="w-5 h-5 stroke-[2.5]" />
@@ -1943,16 +1950,16 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
       {activeSubTab === 'daily' && (
         <div className="space-y-5">
           {/* Multi-filter Bar */}
-          <div className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 space-y-3">
+          <div className="p-4 sm:p-5 bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onClick={() => applyQuickDateRange('today')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                  className={`px-3 py-1.5 rounded-[8px] text-xs font-semibold border transition-colors whitespace-nowrap ${
                     effectiveStart === todayISO && effectiveEnd === todayISO
-                      ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white'
-                      : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300'
+                      ? 'bg-[#171717] dark:bg-white text-white dark:text-[#171717] border-[#171717] dark:border-white'
+                      : 'bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-neutral-300'
                   }`}
                 >
                   Bu gün
@@ -1960,31 +1967,31 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                 <button
                   type="button"
                   onClick={() => applyQuickDateRange('week')}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold border bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  className="px-3 py-1.5 rounded-[8px] text-xs font-semibold border bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-[#2a2a2a] whitespace-nowrap"
                 >
                   Son 7 gün
                 </button>
                 <button
                   type="button"
                   onClick={() => applyQuickDateRange('month')}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold border bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  className="px-3 py-1.5 rounded-[8px] text-xs font-semibold border bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-[#2a2a2a] whitespace-nowrap"
                 >
                   Bu ay
                 </button>
                 <button
                   type="button"
                   onClick={() => applyQuickDateRange('all')}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold border bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  className="px-3 py-1.5 rounded-[8px] text-xs font-semibold border bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-[#2a2a2a] whitespace-nowrap"
                 >
                   Bütün Tarixlər
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowCancelledSales(prev => !prev)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors whitespace-nowrap ${
+                  className={`px-3 py-1.5 rounded-[8px] text-xs font-semibold border transition-colors whitespace-nowrap ${
                     showCancelledSales
-                      ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 border-zinc-900 dark:border-white'
-                      : 'bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400'
+                      ? 'bg-[#171717] dark:bg-white text-white dark:text-[#171717] border-[#171717] dark:border-white'
+                      : 'bg-[#F5F5F5] dark:bg-[#222222] border-[#E5E5E5] dark:border-[#2E2E2E] text-[#888888]'
                   }`}
                 >
                   {showCancelledSales ? 'Ləğv edilənlər: Açıq' : 'Ləğv edilənləri göstər'}
@@ -1996,7 +2003,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   <button
                     type="button"
                     onClick={() => confirmDaySales(effectiveStart)}
-                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-[10px] flex items-center gap-1.5 transition-colors whitespace-nowrap"
                   >
                     <CheckCircle className="w-3.5 h-3.5" />
                     <span>Günü Təsdiq Et</span>
@@ -2005,7 +2012,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                 <button
                   type="button"
                   onClick={() => exportSalesToCSV(filteredHistorySales)}
-                  className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl flex items-center gap-1.5 whitespace-nowrap"
+                  className="px-3 py-1.5 text-xs font-semibold bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] hover:bg-neutral-200 dark:hover:bg-[#2a2a2a] text-[#171717] dark:text-neutral-200 rounded-[10px] flex items-center gap-1.5 whitespace-nowrap"
                 >
                   <Download className="w-3.5 h-3.5" />
                   <span>Excel / CSV</span>
@@ -2015,37 +2022,37 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
               <div>
-                <span className="text-[10px] font-bold uppercase text-zinc-500 block mb-1">
+                <span className="text-[10px] font-semibold uppercase text-[#888888] block mb-1">
                   Başlanğıc Tarix
                 </span>
                 <input
                   type="date"
                   value={filterStartDate}
                   onChange={e => setFilterStartDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs font-mono tabular-nums rounded-lg border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                  className="w-full px-2.5 py-1.5 text-xs font-mono tabular-nums rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                 />
               </div>
 
               <div>
-                <span className="text-[10px] font-bold uppercase text-zinc-500 block mb-1">
+                <span className="text-[10px] font-semibold uppercase text-[#888888] block mb-1">
                   Son Tarix
                 </span>
                 <input
                   type="date"
                   value={filterEndDate}
                   onChange={e => setFilterEndDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs font-mono tabular-nums rounded-lg border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                  className="w-full px-2.5 py-1.5 text-xs font-mono tabular-nums rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                 />
               </div>
 
               <div>
-                <span className="text-[10px] font-bold uppercase text-zinc-500 block mb-1">
+                <span className="text-[10px] font-semibold uppercase text-[#888888] block mb-1">
                   Məhsul Üzrə Filtr
                 </span>
                 <select
                   value={filterProductId}
                   onChange={e => setFilterProductId(e.target.value)}
-                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                  className="w-full px-2.5 py-1.5 text-xs rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                 >
                   <option value="all">Bütün Məhsullar</option>
                   {products.map(p => (
@@ -2057,13 +2064,13 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
               </div>
 
               <div>
-                <span className="text-[10px] font-bold uppercase text-zinc-500 block mb-1">
+                <span className="text-[10px] font-semibold uppercase text-[#888888] block mb-1">
                   Ödəniş Növü
                 </span>
                 <select
                   value={filterPaymentType}
                   onChange={e => setFilterPaymentType(e.target.value as 'all' | PaymentType)}
-                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                  className="w-full px-2.5 py-1.5 text-xs rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                 >
                   <option value="all">Bütün Ödəniş Növləri</option>
                   <option value="naqd">Nağd</option>
@@ -2076,7 +2083,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
               </div>
 
               <div>
-                <span className="text-[10px] font-bold uppercase text-zinc-500 block mb-1">
+                <span className="text-[10px] font-semibold uppercase text-[#888888] block mb-1">
                   Axtarış (Ad / Tel / Məhsul)
                 </span>
                 <input
@@ -2084,7 +2091,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   value={historySearch}
                   onChange={e => setHistorySearch(e.target.value)}
                   placeholder="Müştəri, telefon, məhsul..."
-                  className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                  className="w-full px-2.5 py-1.5 text-xs rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                 />
               </div>
             </div>
@@ -2092,68 +2099,68 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
           {/* Filtered Separation Summary Strip */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-            <div className="p-3.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 block">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626]">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#888888] block">
                 Ümumi Satış
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-zinc-900 dark:text-white mt-1 block">
+              <span className="text-base font-bold font-mono tabular-nums text-[#171717] dark:text-white mt-1 block">
                 {formatAZN(filteredMetrics.grossSalesTotal)}
               </span>
-              <span className="text-[10px] text-zinc-500 tabular-nums">
+              <span className="text-[10px] text-[#888888] font-mono tabular-nums">
                 {filteredMetrics.salesCount} çek · {filteredMetrics.totalItemsSold} ədəd
               </span>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626]">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block">
                 Nağd Satış
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1 block">
+              <span className="text-base font-bold font-mono tabular-nums text-emerald-600 dark:text-emerald-400 mt-1 block">
                 {formatAZN(filteredMetrics.cashSales)}
               </span>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 block">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626]">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400 block">
                 Kart / POS
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-blue-700 dark:text-blue-400 mt-1 block">
+              <span className="text-base font-bold font-mono tabular-nums text-blue-600 dark:text-blue-400 mt-1 block">
                 {formatAZN(filteredMetrics.cardSales + filteredMetrics.posSales)}
               </span>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-rose-50/60 dark:bg-rose-950/25 border border-rose-200 dark:border-rose-900/60">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 dark:text-rose-400 block">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E32636]/30">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-[#E32636] block">
                 Nisyə Satış
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-rose-700 dark:text-rose-400 mt-1 block">
+              <span className="text-base font-bold font-mono tabular-nums text-[#E32636] mt-1 block">
                 {formatAZN(filteredMetrics.creditSales)}
               </span>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 block">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626]">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 block">
                 Endirimlər
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-amber-700 dark:text-amber-400 mt-1 block">
+              <span className="text-base font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400 mt-1 block">
                 {formatAZN(filteredMetrics.totalDiscounts)}
               </span>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-amber-50/60 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-900/60">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400 block">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626]">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 block">
                 Borcdan Daxilolan
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-amber-700 dark:text-amber-400 mt-1 block">
+              <span className="text-base font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400 mt-1 block">
                 {formatAZN(filteredMetrics.debtCollectedTotal)}
               </span>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-800">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300 block">
+            <div className="p-3.5 rounded-[14px] bg-white dark:bg-[#171717] border border-emerald-500/35">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 dark:text-emerald-400 block">
                 Faktiki Kassa
               </span>
-              <span className="text-base font-black font-mono tabular-nums text-emerald-800 dark:text-emerald-300 mt-1 block">
+              <span className="text-base font-bold font-mono tabular-nums text-emerald-700 dark:text-emerald-400 mt-1 block">
                 {formatAZN(filteredMetrics.actualDrawerInflow)}
               </span>
             </div>
@@ -2161,206 +2168,218 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Sales Operations Table */}
-            <div className="lg:col-span-8 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-              <div className="px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+            <div className="lg:col-span-8 bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between">
+                <h3 className="text-sm font-bold text-[#171717] dark:text-white">
                   Satış Əməliyyatları ({filteredHistorySales.length})
                 </h3>
-                <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono tabular-nums">
+                <span className="text-xs text-[#888888] font-mono tabular-nums">
                   {formatDateAZ(effectiveStart)}
                   {effectiveStart !== effectiveEnd ? ` – ${formatDateAZ(effectiveEnd)}` : ''}
                 </span>
               </div>
 
               {filteredHistorySales.length === 0 ? (
-                <div className="py-12 text-center text-zinc-500 text-xs">
+                <div className="py-12 text-center text-[#888888] text-xs">
                   Seçilmiş filtrlərə uyğun satış əməliyyatı tapılmadı.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-zinc-50 dark:bg-zinc-950 text-zinc-500 dark:text-zinc-400 font-semibold border-b border-zinc-200 dark:border-zinc-800 uppercase tracking-wider text-[10px]">
-                      <tr>
-                        <th className="py-3 px-4">Tarix / Saat</th>
-                        <th className="py-3 px-4">Məhsullar</th>
-                        <th className="py-3 px-4">Ödəniş / Status</th>
-                        <th className="py-3 px-4 text-right">Məbləğ</th>
-                        <th className="py-3 px-4 text-right">Əməliyyat</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                      {filteredHistorySales.map(s => {
-                        const badge = getPaymentBadge(s);
-                        const entryDateStr = s.createdAt ? s.createdAt.slice(0, 10) : s.date;
-                        const wasBackdatedOrEdited =
-                          entryDateStr !== s.date || Boolean(s.dateChangedAt);
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-[#F5F5F5] dark:bg-[#111111] text-[#888888] font-semibold border-b border-[#E5E5E5] dark:border-[#262626] uppercase tracking-wider text-[10px]">
+                        <tr>
+                          <th className="py-3 px-4">Tarix / Saat</th>
+                          <th className="py-3 px-4">Məhsullar</th>
+                          <th className="py-3 px-4">Ödəniş / Status</th>
+                          <th className="py-3 px-4 text-right">Məbləğ</th>
+                          <th className="py-3 px-4 text-right">Əməliyyat</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[#E5E5E5] dark:divide-[#262626]">
+                        {filteredHistorySales
+                          .slice((salesHistoryPage - 1) * SALES_PAGE_SIZE, salesHistoryPage * SALES_PAGE_SIZE)
+                          .map(s => {
+                            const badge = getPaymentBadge(s);
+                            const entryDateStr = s.createdAt ? s.createdAt.slice(0, 10) : s.date;
+                            const wasBackdatedOrEdited =
+                              entryDateStr !== s.date || Boolean(s.dateChangedAt);
 
-                        return (
-                          <tr
-                            key={s.id}
-                            className={`transition-colors ${
-                              s.isCancelled
-                                ? 'bg-red-50/40 dark:bg-red-950/15 opacity-75'
-                                : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/40'
-                            }`}
-                          >
-                            <td className="py-3 px-4 whitespace-nowrap align-top">
-                              <div className="font-mono tabular-nums font-bold text-zinc-900 dark:text-white">
-                                {formatDateAZ(s.date)}
-                              </div>
-                              <div className="text-[11px] font-mono tabular-nums text-zinc-500 flex items-center gap-1">
-                                <Clock className="w-3 h-3" />
-                                <span>{s.time}</span>
-                                <span>· @{s.createdBy}</span>
-                              </div>
-                              {wasBackdatedOrEdited && (
-                                <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 font-mono tabular-nums">
-                                  {s.dateChangedAt && s.originalDate && s.originalDate !== s.date
-                                    ? `İlk: ${formatDateAZ(s.originalDate)}`
-                                    : `Daxil: ${formatDateAZ(entryDateStr)}`}
-                                  {(s.editHistory?.length || 0) > 0 && ` · ${s.editHistory!.length} redaktə`}
-                                </div>
-                              )}
-                            </td>
-
-                            <td className="py-3 px-4 align-top">
-                              <div className="space-y-0.5">
-                                {s.items.map((i, idx) => (
-                                  <div
-                                    key={idx}
-                                    className={`text-zinc-800 dark:text-zinc-200 ${s.isCancelled ? 'line-through text-zinc-500' : ''}`}
-                                  >
-                                    <span className="font-semibold">{i.productName}</span>{' '}
-                                    <span className="font-mono tabular-nums text-zinc-500">
-                                      ({i.quantity} × {formatAZN(i.unitPrice)})
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                              {s.debtorName && (
-                                <div className="text-[11px] text-zinc-600 dark:text-zinc-400 mt-1 flex flex-wrap items-center gap-2">
-                                  <span className="font-semibold text-rose-700 dark:text-rose-400">
-                                    Müştəri: {s.debtorName}
-                                  </span>
-                                  {s.debtorPhone && (
-                                    <span className="font-mono tabular-nums text-zinc-500">
-                                      {s.debtorPhone}
-                                    </span>
-                                  )}
-                                </div>
-                              )}
-                              {s.isCancelled && (
-                                <div className="text-[10px] text-red-600 dark:text-red-400 mt-1 font-semibold">
-                                  Ləğv edən: @{s.cancelledBy || 'admin'}
-                                  {s.cancelReason ? ` — "${s.cancelReason}"` : ''}
-                                </div>
-                              )}
-                            </td>
-
-                            <td className="py-3 px-4 align-top whitespace-nowrap">
-                              <span
-                                className={`inline-block px-2 py-0.5 text-[10px] font-bold rounded-md border ${badge.cls}`}
-                              >
-                                {badge.label}
-                              </span>
-                              <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-                                {badge.status}
-                              </div>
-                            </td>
-
-                            <td className="py-3 px-4 text-right align-top whitespace-nowrap font-mono tabular-nums">
-                              <div
-                                className={`font-black text-sm ${
+                            return (
+                              <tr
+                                key={s.id}
+                                className={`transition-colors ${
                                   s.isCancelled
-                                    ? 'line-through text-zinc-400 dark:text-zinc-500'
-                                    : 'text-zinc-900 dark:text-white'
+                                    ? 'bg-[#E32636]/5 opacity-75'
+                                    : 'hover:bg-[#F5F5F5] dark:hover:bg-[#222222]/60'
                                 }`}
                               >
-                                {formatAZN(s.totalAmount)}
-                              </div>
-                              {(s.discountAmount || 0) > 0 && (
-                                <div className="text-[10px] text-amber-600 dark:text-amber-400">
-                                  Endirim: −{formatAZN(s.discountAmount || 0)}
-                                </div>
-                              )}
-                            </td>
+                                <td className="py-3 px-4 whitespace-nowrap align-top">
+                                  <div className="font-mono tabular-nums font-bold text-[#171717] dark:text-white">
+                                    {formatDateAZ(s.date)}
+                                  </div>
+                                  <div className="text-[11px] font-mono tabular-nums text-[#888888] flex items-center gap-1">
+                                    <Clock className="w-3 h-3" />
+                                    <span>{s.time}</span>
+                                    <span>· @{s.createdBy}</span>
+                                  </div>
+                                  {wasBackdatedOrEdited && (
+                                    <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5 font-mono tabular-nums">
+                                      {s.dateChangedAt && s.originalDate && s.originalDate !== s.date
+                                        ? `İlk: ${formatDateAZ(s.originalDate)}`
+                                        : `Daxil: ${formatDateAZ(entryDateStr)}`}
+                                      {(s.editHistory?.length || 0) > 0 && ` · ${s.editHistory!.length} redaktə`}
+                                    </div>
+                                  )}
+                                </td>
 
-                            <td className="py-3 px-4 text-right align-top whitespace-nowrap">
-                              {!s.isCancelled ? (
-                                <div className="flex items-center justify-end gap-1.5">
-                                  {!s.isConfirmed && (
-                                    <button
-                                      type="button"
-                                      onClick={() => confirmSale(s.id)}
-                                      title="Satışı Təsdiqlə"
-                                      className="px-2 py-1 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-md"
-                                    >
-                                      Təsdiqlə
-                                    </button>
+                                <td className="py-3 px-4 align-top">
+                                  <div className="space-y-0.5">
+                                    {s.items.map((i, idx) => (
+                                      <div
+                                        key={idx}
+                                        className={`text-[#171717] dark:text-neutral-200 ${s.isCancelled ? 'line-through text-[#888888]' : ''}`}
+                                      >
+                                        <span className="font-semibold">{i.productName}</span>{' '}
+                                        <span className="font-mono tabular-nums text-[#888888]">
+                                          ({i.quantity} × {formatAZN(i.unitPrice)})
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  {s.debtorName && (
+                                    <div className="text-[11px] text-[#888888] mt-1 flex flex-wrap items-center gap-2">
+                                      <span className="font-semibold text-[#E32636]">
+                                        Müştəri: {s.debtorName}
+                                      </span>
+                                      {s.debtorPhone && (
+                                        <span className="font-mono tabular-nums text-[#888888]">
+                                          {s.debtorPhone}
+                                        </span>
+                                      )}
+                                    </div>
                                   )}
-                                  <button
-                                    type="button"
-                                    onClick={() => openEditSaleDateModal(s)}
-                                    title="Tarixi Dəyiş"
-                                    className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                                  {s.isCancelled && (
+                                    <div className="text-[10px] text-[#E32636] mt-1 font-semibold">
+                                      Ləğv edən: @{s.cancelledBy || 'admin'}
+                                      {s.cancelReason ? ` — "${s.cancelReason}"` : ''}
+                                    </div>
+                                  )}
+                                </td>
+
+                                <td className="py-3 px-4 align-top whitespace-nowrap">
+                                  <span
+                                    className={`inline-block px-2 py-0.5 text-[10px] font-semibold rounded-[6px] border ${badge.cls}`}
                                   >
-                                    <Edit3 className="w-3.5 h-3.5" />
-                                  </button>
-                                  {isAdmin && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setCancellingSale(s);
-                                        setCancelReasonInput('');
-                                      }}
-                                      title="Satışı ləğv et (Tarixçədə saxlanılır, stok və balans bərpa olunur)"
-                                      className="px-2 py-1 rounded-lg border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 text-[10px] font-bold inline-flex items-center gap-1 transition-colors"
-                                    >
-                                      <Ban className="w-3 h-3" />
-                                      <span>Ləğv Et</span>
-                                    </button>
+                                    {badge.label}
+                                  </span>
+                                  <div className="text-[11px] text-[#888888] mt-0.5">
+                                    {badge.status}
+                                  </div>
+                                </td>
+
+                                <td className="py-3 px-4 text-right align-top whitespace-nowrap font-mono tabular-nums">
+                                  <div
+                                    className={`font-bold text-sm ${
+                                      s.isCancelled
+                                        ? 'line-through text-[#888888]'
+                                        : 'text-[#171717] dark:text-white'
+                                    }`}
+                                  >
+                                    {formatAZN(s.totalAmount)}
+                                  </div>
+                                  {(s.discountAmount || 0) > 0 && (
+                                    <div className="text-[10px] text-amber-600 dark:text-amber-400">
+                                      Endirim: −{formatAZN(s.discountAmount || 0)}
+                                    </div>
                                   )}
-                                </div>
-                              ) : (
-                                <span className="text-[10px] font-mono text-zinc-400">
-                                  Arxiv · Ləğv
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                                </td>
+
+                                <td className="py-3 px-4 text-right align-top whitespace-nowrap">
+                                  {!s.isCancelled ? (
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      {!s.isConfirmed && (
+                                        <button
+                                          type="button"
+                                          onClick={() => confirmSale(s.id)}
+                                          title="Satışı Təsdiqlə"
+                                          className="px-2 py-1 text-[10px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-[6px]"
+                                        >
+                                          Təsdiqlə
+                                        </button>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() => openEditSaleDateModal(s)}
+                                        title="Tarixi Dəyiş"
+                                        className="p-1.5 rounded-[8px] border border-[#E5E5E5] dark:border-[#2E2E2E] text-[#888888] hover:text-[#171717] dark:hover:text-white hover:bg-[#F5F5F5] dark:hover:bg-[#222222] transition-colors"
+                                      >
+                                        <Edit3 className="w-3.5 h-3.5" />
+                                      </button>
+                                      {isAdmin && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setCancellingSale(s);
+                                            setCancelReasonInput('');
+                                          }}
+                                          title="Satışı ləğv et (Tarixçədə saxlanılır, stok və balans bərpa olunur)"
+                                          className="px-2 py-1 rounded-[8px] border border-[#E32636]/25 text-[#E32636] hover:bg-[#E32636]/10 text-[10px] font-semibold inline-flex items-center gap-1 transition-colors"
+                                        >
+                                          <Ban className="w-3 h-3" />
+                                          <span>Ləğv Et</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] font-mono text-[#888888]">
+                                      Arxiv · Ləğv
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <TablePagination
+                    totalItems={filteredHistorySales.length}
+                    pageSize={SALES_PAGE_SIZE}
+                    currentPage={salesHistoryPage}
+                    onPageChange={setSalesHistoryPage}
+                    primaryColor={primaryColor}
+                  />
+                </>
               )}
             </div>
 
             {/* Product Summary */}
-            <div className="lg:col-span-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 space-y-4">
-              <div className="pb-2 border-b border-zinc-200 dark:border-zinc-800">
-                <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+            <div className="lg:col-span-4 bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] p-5 space-y-4">
+              <div className="pb-2 border-b border-[#E5E5E5] dark:border-[#262626]">
+                <h3 className="text-sm font-bold text-[#171717] dark:text-white">
                   Satılan Məhsul Sayı (Dövr Üzrə)
                 </h3>
-                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                <p className="text-[11px] text-[#888888]">
                   Məhsullar üzrə kəmiyyət və dövriyyə bölgüsü
                 </p>
               </div>
 
               {filteredProductStats.length === 0 ? (
-                <div className="py-8 text-center text-zinc-500 text-xs">
+                <div className="py-8 text-center text-[#888888] text-xs">
                   Satılan məhsul yoxdur.
                 </div>
               ) : (
-                <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                <div className="divide-y divide-[#E5E5E5] dark:divide-[#262626]">
                   {filteredProductStats.map((stat, idx) => (
                     <div key={idx} className="py-2.5 flex items-center justify-between text-xs gap-2">
-                      <span className="font-semibold text-zinc-800 dark:text-zinc-200 truncate">
+                      <span className="font-semibold text-[#171717] dark:text-neutral-200 truncate">
                         {stat.name}
                       </span>
                       <div className="flex items-center gap-3 shrink-0 font-mono tabular-nums">
-                        <span className="text-zinc-500 dark:text-zinc-400">{stat.quantity} əd.</span>
-                        <span className="font-bold text-zinc-900 dark:text-white">
+                        <span className="text-[#888888]">{stat.quantity} əd.</span>
+                        <span className="font-bold text-[#171717] dark:text-white">
                           {formatAZN(stat.revenue)}
                         </span>
                       </div>
@@ -2378,39 +2397,39 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
          ───────────────────────────────────────────────────────── */}
       {activeSubTab === 'monthly' && (
         <div className="space-y-6">
-          <div className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="p-5 bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <Calendar className="w-5 h-5 text-red-500" />
+              <Calendar className="w-5 h-5 text-[#E32636]" />
               <div>
-                <span className="text-xs text-zinc-500 dark:text-zinc-400 font-medium block">
+                <span className="text-xs text-[#888888] font-medium block">
                   Ayı Seçin:
                 </span>
                 <input
                   type="month"
                   value={selectedMonth}
                   onChange={e => setSelectedMonth(e.target.value)}
-                  className="font-mono text-sm font-bold bg-transparent border-b border-zinc-300 dark:border-zinc-700 pb-0.5 text-zinc-900 dark:text-white focus:outline-none focus:border-red-500"
+                  className="font-mono text-sm font-bold bg-transparent border-b border-[#E5E5E5] dark:border-[#2E2E2E] pb-0.5 text-[#171717] dark:text-white focus:outline-none focus:border-[#E32636]"
                 />
               </div>
             </div>
 
             <div className="text-right">
-              <span className="text-xs text-zinc-500 dark:text-zinc-400 block">
+              <span className="text-xs text-[#888888] block">
                 {getMonthLabelAZ(selectedMonth)} Ümumi Satış
               </span>
-              <span className="text-2xl font-black font-mono tabular-nums text-zinc-900 dark:text-white">
+              <span className="text-2xl font-bold font-mono tabular-nums text-[#171717] dark:text-white">
                 {formatAZN(monthTotalAmount)}
               </span>
             </div>
           </div>
 
-          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 space-y-4">
-            <h3 className="text-sm font-bold text-zinc-900 dark:text-white pb-2 border-b border-zinc-200 dark:border-zinc-800">
+          <div className="bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] p-5 space-y-4">
+            <h3 className="text-sm font-bold text-[#171717] dark:text-white pb-2 border-b border-[#E5E5E5] dark:border-[#262626]">
               {getMonthLabelAZ(selectedMonth)} Üzrə Satılan Məhsul Statistikası
             </h3>
 
             {Object.values(monthlyProductStats).length === 0 ? (
-              <div className="py-12 text-center text-zinc-500 text-xs">
+              <div className="py-12 text-center text-[#888888] text-xs">
                 Bu ay üzrə satış yoxdur.
               </div>
             ) : (
@@ -2420,17 +2439,17 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   .map((stat, idx) => (
                     <div
                       key={idx}
-                      className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between"
+                      className="p-3.5 rounded-[12px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] flex items-center justify-between"
                     >
                       <div>
-                        <span className="text-xs font-bold text-zinc-900 dark:text-white block">
+                        <span className="text-xs font-bold text-[#171717] dark:text-white block">
                           {stat.name}
                         </span>
-                        <span className="text-[11px] font-mono tabular-nums text-zinc-500 dark:text-zinc-400">
+                        <span className="text-[11px] font-mono tabular-nums text-[#888888]">
                           {stat.quantity} ədəd satılıb
                         </span>
                       </div>
-                      <span className="text-sm font-mono tabular-nums font-black text-red-600 dark:text-red-400">
+                      <span className="text-sm font-mono tabular-nums font-bold text-[#E32636]">
                         {formatAZN(stat.revenue)}
                       </span>
                     </div>
@@ -2444,40 +2463,40 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
       {/* Modal: Change Sale Date (Preserving original entry timestamp) */}
       {editingSale && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
-          <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-            <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+          <div className="bg-white dark:bg-[#171717] w-full max-w-md rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] overflow-hidden">
+            <div className="px-5 py-4 border-b border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Calendar className="w-5 h-5 text-red-500" />
-                <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                <Calendar className="w-5 h-5 text-[#E32636]" />
+                <h3 className="text-base font-bold text-[#171717] dark:text-white">
                   Satış Tarixini Dəyişdir
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setEditingSale(null)}
-                className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-white"
+                className="p-1 text-[#888888] hover:text-[#171717] dark:hover:text-white"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSaveSaleDate} className="p-5 space-y-4">
-              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs space-y-1">
+              <div className="p-3 rounded-[10px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] text-xs space-y-1">
                 <div className="flex justify-between">
-                  <span className="text-zinc-500">Satış məbləği:</span>
-                  <strong className="font-mono tabular-nums text-zinc-900 dark:text-white">
+                  <span className="text-[#888888]">Satış məbləği:</span>
+                  <strong className="font-mono tabular-nums text-[#171717] dark:text-white">
                     {formatAZN(editingSale.totalAmount)} ({editingSale.paymentType.toUpperCase()})
                   </strong>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-zinc-500">Hazırkı hesabat tarixi:</span>
-                  <strong className="font-mono tabular-nums text-zinc-900 dark:text-white">
+                  <span className="text-[#888888]">Hazırkı hesabat tarixi:</span>
+                  <strong className="font-mono tabular-nums text-[#171717] dark:text-white">
                     {formatDateAZ(editingSale.date)} ({editingSale.time})
                   </strong>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-zinc-500">Faktiki daxilolma vaxtı:</span>
-                  <span className="font-mono tabular-nums text-zinc-600 dark:text-zinc-400">
+                  <span className="text-[#888888]">Faktiki daxilolma vaxtı:</span>
+                  <span className="font-mono tabular-nums text-[#888888]">
                     {editingSale.createdAt
                       ? new Date(editingSale.createdAt).toLocaleString('az-AZ')
                       : formatDateAZ(editingSale.date)}
@@ -2487,7 +2506,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
+                  <label className="block text-xs font-semibold text-[#888888] mb-1">
                     Yeni Tarix *
                   </label>
                   <input
@@ -2495,41 +2514,41 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                     required
                     value={editDateValue}
                     onChange={e => setEditDateValue(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    className="w-full px-3 py-2 text-sm font-mono tabular-nums rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
+                  <label className="block text-xs font-semibold text-[#888888] mb-1">
                     Saat
                   </label>
                   <input
                     type="time"
                     value={editTimeValue}
                     onChange={e => setEditTimeValue(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    className="w-full px-3 py-2 text-sm font-mono tabular-nums rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   />
                 </div>
               </div>
 
-              <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-2">
+              <div className="p-2.5 rounded-[10px] bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/70 text-[11px] text-amber-800 dark:text-amber-300 flex items-start gap-2">
                 <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
                 <span>
                   Yalnız köhnə tarixin ({formatDateAZ(editingSale.date)}) və yeni seçilən tarixin günlük hesabatları yenidən hesablanacaq. Digər günlərə toxunulmur.
                 </span>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-zinc-200 dark:border-zinc-800">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#E5E5E5] dark:border-[#262626]">
                 <button
                   type="button"
                   onClick={() => setEditingSale(null)}
-                  className="px-4 py-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400"
+                  className="px-4 py-2 text-xs font-semibold text-[#888888] hover:text-[#171717] dark:hover:text-white"
                 >
                   Ləğv et
                 </button>
                 <button
                   type="submit"
                   style={{ backgroundColor: primaryColor }}
-                  className="px-5 py-2 text-xs font-bold text-white rounded-xl hover:opacity-95"
+                  className="px-5 py-2 text-xs font-semibold text-white rounded-[10px] hover:opacity-95"
                 >
                   Tarixi Yadda Saxla
                 </button>
@@ -2542,18 +2561,18 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
       {/* Quick Deposit Modal */}
       {isDepositModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
-          <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-            <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+          <div className="bg-white dark:bg-[#171717] w-full max-w-md rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] overflow-hidden">
+            <div className="px-6 py-4 border-b border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Coins className="w-5 h-5 text-amber-500" />
-                <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                <h3 className="text-base font-bold text-[#171717] dark:text-white">
                   Müştəri Balansını Artır (Depozit)
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setIsDepositModalOpen(false)}
-                className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-white"
+                className="p-1 text-[#888888] hover:text-[#171717] dark:hover:text-white"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2561,7 +2580,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
 
             <form onSubmit={handleQuickDepositSubmit} className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-semibold text-[#888888] uppercase tracking-wider mb-1">
                   Müştəri Adı *
                 </label>
                 <input
@@ -2570,12 +2589,12 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   value={depositName}
                   onChange={e => setDepositName(e.target.value)}
                   placeholder="məs: Əli, Ramin, Tural..."
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white font-semibold"
+                  className="w-full px-3.5 py-2.5 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white font-semibold"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-semibold text-[#888888] uppercase tracking-wider mb-1">
                   Qoyulan Məbləğ (AZN) *
                 </label>
                 <input
@@ -2585,7 +2604,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   required
                   value={depositAmount}
                   onChange={e => setDepositAmount(parseFloat(e.target.value) || 0)}
-                  className="w-full px-3.5 py-2.5 text-base font-mono tabular-nums font-black rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white"
+                  className="w-full px-3.5 py-2.5 text-base font-mono tabular-nums font-bold rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                 />
                 <div className="flex gap-1.5 mt-2">
                   {[5, 10, 15, 20, 50].map(val => (
@@ -2593,10 +2612,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                       key={val}
                       type="button"
                       onClick={() => setDepositAmount(val)}
-                      className={`flex-1 py-1 text-xs font-mono font-bold rounded-lg border transition-all ${
+                      className={`flex-1 py-1 text-xs font-mono font-bold rounded-[8px] border transition-colors ${
                         depositAmount === val
                           ? 'bg-amber-600 text-white border-amber-500'
-                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700'
+                          : 'bg-[#F5F5F5] dark:bg-[#222222] text-[#888888] border-[#E5E5E5] dark:border-[#2E2E2E]'
                       }`}
                     >
                       {val} ₼
@@ -2606,7 +2625,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-semibold text-[#888888] uppercase tracking-wider mb-1">
                   Qəbul Edilən Ödəniş Növü
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -2615,10 +2634,10 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                       key={pt}
                       type="button"
                       onClick={() => setDepositPaymentType(pt)}
-                      className={`py-2 text-xs font-bold rounded-xl border transition-all ${
+                      className={`py-2 text-xs font-semibold rounded-[10px] border transition-colors ${
                         depositPaymentType === pt
                           ? 'bg-amber-600 text-white border-amber-500'
-                          : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700'
+                          : 'bg-[#F5F5F5] dark:bg-[#222222] text-[#888888] border-[#E5E5E5] dark:border-[#2E2E2E]'
                       }`}
                     >
                       {pt.toUpperCase()}
@@ -2628,7 +2647,7 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-xs font-semibold text-[#888888] uppercase tracking-wider mb-1">
                   Qeyd
                 </label>
                 <input
@@ -2636,21 +2655,21 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   value={depositNote}
                   onChange={e => setDepositNote(e.target.value)}
                   placeholder="məs: 1 aylıq su depoziti"
-                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white"
+                  className="w-full px-3.5 py-2 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                 />
               </div>
 
-              <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-2">
+              <div className="pt-3 border-t border-[#E5E5E5] dark:border-[#262626] flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsDepositModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                  className="px-4 py-2 text-xs font-semibold text-[#888888] hover:text-[#171717] dark:hover:text-white"
                 >
                   Ləğv et
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl"
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold rounded-[10px]"
                 >
                   Balansı Artır
                 </button>
@@ -2663,44 +2682,44 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
       {/* Cancel Sale Confirmation Modal (Non-destructive Audit) */}
       {cancellingSale && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
-          <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-2xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-            <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+          <div className="bg-white dark:bg-[#171717] w-full max-w-md rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] overflow-hidden">
+            <div className="px-5 py-4 border-b border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Ban className="w-5 h-5 text-red-500" />
-                <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                <Ban className="w-5 h-5 text-[#E32636]" />
+                <h3 className="text-base font-bold text-[#171717] dark:text-white">
                   Satışı Ləğv Et
                 </h3>
               </div>
               <button
                 type="button"
                 onClick={() => setCancellingSale(null)}
-                className="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-white"
+                className="p-1 text-[#888888] hover:text-[#171717] dark:hover:text-white"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleConfirmCancelSale} className="p-5 space-y-4">
-              <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-xs space-y-1">
+              <div className="p-3 rounded-[10px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] text-xs space-y-1">
                 <div className="flex justify-between">
-                  <span className="text-zinc-500">Tarix / Saat:</span>
-                  <strong className="font-mono tabular-nums text-zinc-900 dark:text-white">
+                  <span className="text-[#888888]">Tarix / Saat:</span>
+                  <strong className="font-mono tabular-nums text-[#171717] dark:text-white">
                     {formatDateAZ(cancellingSale.date)} ({cancellingSale.time})
                   </strong>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-zinc-500">Məbləğ:</span>
-                  <strong className="font-mono tabular-nums text-zinc-900 dark:text-white">
+                  <span className="text-[#888888]">Məbləğ:</span>
+                  <strong className="font-mono tabular-nums text-[#171717] dark:text-white">
                     {formatAZN(cancellingSale.totalAmount)} ({formatSalePaymentLabel(cancellingSale)})
                   </strong>
                 </div>
-                <div className="text-zinc-600 dark:text-zinc-400 pt-1">
+                <div className="text-[#888888] pt-1">
                   {cancellingSale.items.map(i => `${i.productName} ×${i.quantity}`).join(', ')}
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 mb-1">
+                <label className="block text-xs font-semibold text-[#888888] mb-1">
                   Ləğv etmə səbəbi
                 </label>
                 <input
@@ -2708,25 +2727,25 @@ export const PosSalesView: React.FC<{ onNavigateToDebts?: () => void }> = ({ onN
                   value={cancelReasonInput}
                   onChange={e => setCancelReasonInput(e.target.value)}
                   placeholder="məs: Səhv məhsul vurulub"
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                  className="w-full px-3 py-2 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                 />
               </div>
 
-              <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 text-[11px] text-amber-800 dark:text-amber-300">
+              <div className="p-2.5 rounded-[10px] bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/70 text-[11px] text-amber-800 dark:text-amber-300">
                 Satış silinməyəcək — tarixçədə «Ləğv edilib» statusu ilə qalacaq, anbar stoku, müştəri balansı və bağlı borc avtomatik geri qaytarılacaq.
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-zinc-200 dark:border-zinc-800">
+              <div className="flex justify-end gap-2 pt-2 border-t border-[#E5E5E5] dark:border-[#262626]">
                 <button
                   type="button"
                   onClick={() => setCancellingSale(null)}
-                  className="px-4 py-2 text-xs font-semibold text-zinc-600 dark:text-zinc-400"
+                  className="px-4 py-2 text-xs font-semibold text-[#888888] hover:text-[#171717] dark:hover:text-white"
                 >
                   İmtina
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-xl"
+                  className="px-5 py-2 text-xs font-semibold bg-[#E32636] hover:bg-[#c81f2e] text-white rounded-[10px]"
                 >
                   Satışı Ləğv Et
                 </button>

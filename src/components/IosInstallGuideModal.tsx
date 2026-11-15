@@ -11,14 +11,14 @@ interface IosInstallGuideModalProps {
 export const IosInstallGuideModal: React.FC<IosInstallGuideModalProps> = ({ isOpen, onClose }) => {
   const { settings } = useApp();
   const appName = settings.barName || 'Zal Barı';
-  const primaryColor = settings.primaryColor || '#dc2626';
+  const primaryColor = settings.primaryColor || '#E32636';
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4">
       <div
-        className="w-full max-w-md rounded-2xl bg-white dark:bg-zinc-950 border border-red-200 dark:border-red-500/30 p-6 shadow-2xl text-zinc-900 dark:text-zinc-100 relative max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-md rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] p-6 shadow-2xl text-[#171717] dark:text-white relative max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <button

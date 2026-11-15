@@ -140,7 +140,7 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
     () => [
       { name: 'Nağd', value: breakdown.totals.naqd, color: '#10b981' },
       { name: 'Kart', value: breakdown.totals.kart, color: '#3b82f6' },
-      { name: 'POS / Köç.', value: breakdown.totals.pos, color: settings.primaryColor || '#dc2626' },
+      { name: 'POS / Köç.', value: breakdown.totals.pos, color: settings.primaryColor || '#E32636' },
       { name: 'Balans', value: breakdown.totals.balans, color: '#f59e0b' },
       { name: 'Nisyə', value: breakdown.totals.nisye, color: '#ef4444' },
     ],
@@ -167,11 +167,11 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
   };
 
   return (
-    <section className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm dark:shadow-xl p-5 sm:p-6 space-y-5 transition-colors">
+    <section className="bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] p-5 sm:p-6 space-y-5 transition-colors">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-[#E5E5E5] dark:border-[#262626]">
         <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900/60 text-red-600 dark:text-red-400 flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-[10px] bg-[#E32636]/10 border border-[#E32636]/30 text-[#E32636] flex items-center justify-center shrink-0">
             <Users className="w-5 h-5" />
           </div>
           <div>
@@ -235,7 +235,7 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
               }`}
               style={
                 datePreset === btn.id
-                  ? { backgroundColor: settings.primaryColor || '#dc2626' }
+                  ? { backgroundColor: settings.primaryColor || '#E32636' }
                   : undefined
               }
             >
@@ -561,8 +561,8 @@ export const StaffPaymentBreakdown: React.FC<StaffPaymentBreakdownProps> = ({
       {/* Modal: Staff Detailed Operations List */}
       {selectedStaffRow && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-          <div className="bg-white dark:bg-zinc-900 w-full max-w-2xl rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col max-h-[85vh]">
-            <div className="p-5 sm:p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+          <div className="bg-white dark:bg-[#171717] w-full max-w-2xl rounded-[14px] shadow-2xl border border-[#E5E5E5] dark:border-[#262626] overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-5 sm:p-6 border-b border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between">
               <div>
                 <h4 className="text-base font-extrabold text-zinc-900 dark:text-white">
                   {selectedStaffRow.staffName} (@{selectedStaffRow.staffUsername})

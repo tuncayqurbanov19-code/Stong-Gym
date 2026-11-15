@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Plus,
   Trash2,
@@ -10,13 +10,15 @@ import { useApp } from '../context/AppContext';
 import { ExpenseCategory } from '../types';
 import { formatAZN, formatDateAZ, getTodayISODate } from '../utils/dateUtils';
 import { exportExpensesToCSV } from '../utils/exportUtils';
+import { TablePagination } from '../components/TablePagination';
 
 const EXPENSE_CATEGORIES: ExpenseCategory[] = ['İcarə', 'Maaş', 'Benzin', 'Kommunal', 'Digər'];
+const PAGE_SIZE = 15;
 
 export const ExpensesView: React.FC = () => {
   const { expenses, addExpense, deleteExpense, currentUser, settings, showToast } = useApp();
   const isAdmin = currentUser?.role === 'admin';
-  const primaryColor = settings.primaryColor || '#dc2626';
+  const primaryColor = settings.primaryColor || '#E32636';
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [category, setCategory] = useState<ExpenseCategory>('Kommunal');
@@ -26,6 +28,7 @@ export const ExpensesView: React.FC = () => {
   const [selectedCatFilter, setSelectedCatFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Category totals
   const categoryTotals: Record<ExpenseCategory, number> = {
@@ -70,18 +73,26 @@ export const ExpensesView: React.FC = () => {
     return matchesCat && matchesSearch;
   });
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedCatFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredExpenses.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedExpenses = filteredExpenses.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
   return (
     <div className="space-y-6 pb-12 max-w-7xl mx-auto">
       {/* Header and Action Buttons */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E5E5E5] dark:border-[#262626]">
         <div>
-          <h2 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
+          <h2 className="text-xl sm:text-2xl font-bold text-[#171717] dark:text-white tracking-tight flex items-center gap-2.5">
             <span>Xərclər İdarəetməsi</span>
-            <span className="text-xs bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 font-bold px-2 py-0.5 rounded-full border border-red-200 dark:border-red-800">
+            <span className="text-[11px] bg-[#E32636]/10 text-[#E32636] font-semibold px-2 py-0.5 rounded-[8px] border border-[#E32636]/20 whitespace-nowrap">
               Xərc Jurnalı
             </span>
           </h2>
-          <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
+          <p className="text-xs sm:text-sm text-[#888888] mt-0.5">
             İcarə, maaş, kommunal və digər əməliyyat xərclərinin qeydiyyatı
           </p>
         </div>
@@ -90,9 +101,9 @@ export const ExpensesView: React.FC = () => {
           <button
             type="button"
             onClick={() => exportExpensesToCSV(expenses)}
-            className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl transition-colors flex items-center gap-1.5 shadow-sm"
+            className="px-3.5 py-2 text-xs font-semibold bg-white dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#262626] hover:bg-[#F5F5F5] dark:hover:bg-[#2B2B2B] text-[#171717] dark:text-white rounded-[10px] transition-colors flex items-center gap-1.5 whitespace-nowrap"
           >
-            <Download className="w-3.5 h-3.5" />
+            <Download className="w-3.5 h-3.5 text-[#888888]" />
             <span>Excel / CSV</span>
           </button>
 
@@ -103,7 +114,7 @@ export const ExpensesView: React.FC = () => {
               setIsModalOpen(true);
             }}
             style={{ backgroundColor: primaryColor }}
-            className="px-4 py-1.5 text-xs font-bold text-white rounded-xl transition-all shadow-md hover:opacity-90 flex items-center gap-1.5"
+            className="px-4 py-2 text-xs font-semibold text-white rounded-[10px] transition-all hover:opacity-90 flex items-center gap-1.5 whitespace-nowrap shadow-xs"
           >
             <Plus className="w-4 h-4" />
             <span>Yeni Xərc Əlavə Et</span>
@@ -113,30 +124,32 @@ export const ExpensesView: React.FC = () => {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <div className="col-span-2 sm:col-span-1 p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-red-200 dark:border-red-900/60 shadow-sm flex flex-col justify-between">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+        <div className="col-span-2 sm:col-span-1 p-4 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E32636]/30 flex flex-col justify-between">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-[#888888]">
             Ümumi Xərc
           </span>
-          <div className="text-xl font-black font-mono text-red-600 dark:text-red-400 mt-2">
+          <div className="text-xl font-bold font-mono tabular-nums text-[#E32636] mt-2">
             {formatAZN(totalExpenses)}
           </div>
-          <p className="text-[10px] text-zinc-500 mt-1">{expenses.length} qeydiyyat</p>
+          <p className="text-[11px] text-[#888888] mt-1 font-mono tabular-nums">
+            {expenses.length} qeydiyyat
+          </p>
         </div>
 
         {EXPENSE_CATEGORIES.map(cat => (
           <div
             key={cat}
-            className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-col justify-between"
+            className="p-4 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] flex flex-col justify-between"
           >
-            <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 truncate">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-[#888888] truncate">
               {cat}
             </span>
-            <div className="text-lg font-black font-mono text-zinc-900 dark:text-white mt-2">
+            <div className="text-lg font-bold font-mono tabular-nums text-[#171717] dark:text-white mt-2">
               {formatAZN(categoryTotals[cat])}
             </div>
-            <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full mt-2 overflow-hidden">
+            <div className="w-full bg-[#F5F5F5] dark:bg-[#222222] h-1.5 rounded-[4px] mt-2.5 overflow-hidden">
               <div
-                className="h-full rounded-full"
+                className="h-full rounded-[4px] transition-all duration-200"
                 style={{
                   backgroundColor: primaryColor,
                   width: `${totalExpenses > 0 ? (categoryTotals[cat] / totalExpenses) * 100 : 0}%`,
@@ -148,28 +161,37 @@ export const ExpensesView: React.FC = () => {
       </div>
 
       {/* Filter and Table Card */}
-      <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden space-y-3">
-        <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+      <div className="bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] overflow-hidden">
+        <div className="p-4 border-b border-[#E5E5E5] dark:border-[#262626] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           <div className="relative flex-1 max-w-sm">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-500" />
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" />
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Xərc qeydlərində axtar..."
-              className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="w-full pl-9 pr-8 py-2 text-xs rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white placeholder:text-[#888888] focus:outline-none focus:ring-2 focus:ring-[#E32636]"
             />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#888888] hover:text-[#171717] dark:hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
-          <div className="flex items-center gap-1.5 overflow-x-auto">
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
             <button
               type="button"
               onClick={() => setSelectedCatFilter('all')}
               style={selectedCatFilter === 'all' ? { backgroundColor: primaryColor } : undefined}
-              className={`px-3 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-[10px] transition-colors whitespace-nowrap ${
                 selectedCatFilter === 'all'
-                  ? 'text-white font-bold shadow-sm'
-                  : 'bg-zinc-100 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:text-zinc-900 dark:hover:text-white'
+                  ? 'text-white shadow-xs'
+                  : 'bg-[#F5F5F5] dark:bg-[#222222] text-[#888888] border border-[#E5E5E5] dark:border-[#262626] hover:text-[#171717] dark:hover:text-white'
               }`}
             >
               Hamısı
@@ -180,10 +202,10 @@ export const ExpensesView: React.FC = () => {
                 type="button"
                 onClick={() => setSelectedCatFilter(cat)}
                 style={selectedCatFilter === cat ? { backgroundColor: primaryColor } : undefined}
-                className={`px-3 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
+                className={`px-3 py-1.5 text-xs font-semibold rounded-[10px] transition-colors whitespace-nowrap ${
                   selectedCatFilter === cat
-                    ? 'text-white font-bold shadow-sm'
-                    : 'bg-zinc-100 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:text-zinc-900 dark:hover:text-white'
+                    ? 'text-white shadow-xs'
+                    : 'bg-[#F5F5F5] dark:bg-[#222222] text-[#888888] border border-[#E5E5E5] dark:border-[#262626] hover:text-[#171717] dark:hover:text-white'
                 }`}
               >
                 {cat}
@@ -193,97 +215,106 @@ export const ExpensesView: React.FC = () => {
         </div>
 
         {filteredExpenses.length === 0 ? (
-          <div className="py-12 text-center text-xs text-zinc-500">
+          <div className="py-12 text-center text-xs text-[#888888]">
             Hələlik heç bir xərc qeydə alınmayıb.
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-zinc-50 dark:bg-zinc-950 text-zinc-500 dark:text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
-                <tr>
-                  <th className="py-3 px-4">Tarix</th>
-                  <th className="py-3 px-4">Kateqoriya</th>
-                  <th className="py-3 px-4">Qeyd və Təyinat</th>
-                  <th className="py-3 px-4 text-right">Məbləğ</th>
-                  <th className="py-3 px-4">Qeydiyyatçı</th>
-                  {isAdmin && <th className="py-3 px-4 text-center">Əməliyyat</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                {filteredExpenses.map(e => (
-                  <tr key={e.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
-                    <td className="py-3 px-4 font-mono text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
-                      {formatDateAZ(e.date)}
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className="font-bold text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200">
-                        {e.category}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 font-medium text-zinc-800 dark:text-zinc-200 max-w-sm truncate">
-                      {e.note || '—'}
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono font-bold text-red-600 dark:text-red-400 whitespace-nowrap">
-                      {formatAZN(e.amount)}
-                    </td>
-                    <td className="py-3 px-4 font-mono text-[11px] text-zinc-500">
-                      @{e.createdBy}
-                    </td>
-                    {isAdmin && (
-                      <td className="py-3 px-4 text-center">
-                        {confirmDeleteId === e.id ? (
-                          <div className="inline-flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                deleteExpense(e.id);
-                                setConfirmDeleteId(null);
-                                showToast('success', 'Xərc qeydi silindi.');
-                              }}
-                              className="px-2 py-0.5 text-[10px] font-bold bg-red-600 text-white rounded-md"
-                            >
-                              Sil
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDeleteId(null)}
-                              className="px-1.5 py-0.5 text-[10px] font-semibold bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-md"
-                            >
-                              Yox
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setConfirmDeleteId(e.id)}
-                            className="p-1 text-red-600 dark:text-red-400 hover:text-red-500"
-                            title="Sil"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </td>
-                    )}
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs min-w-[620px]">
+                <thead className="bg-[#FAFAFA] dark:bg-[#141414] text-[#888888] font-semibold uppercase tracking-wider text-[10px] border-b border-[#E5E5E5] dark:border-[#262626]">
+                  <tr>
+                    <th className="py-3 px-4">Tarix</th>
+                    <th className="py-3 px-4">Kateqoriya</th>
+                    <th className="py-3 px-4">Qeyd və Təyinat</th>
+                    <th className="py-3 px-4 text-right">Məbləğ</th>
+                    <th className="py-3 px-4">Qeydiyyatçı</th>
+                    {isAdmin && <th className="py-3 px-4 text-center">Əməliyyat</th>}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-[#E5E5E5] dark:divide-[#262626]">
+                  {paginatedExpenses.map(e => (
+                    <tr key={e.id} className="hover:bg-[#FAFAFA] dark:hover:bg-[#222222]/50 transition-colors">
+                      <td className="py-3 px-4 font-mono tabular-nums text-[#888888] whitespace-nowrap">
+                        {formatDateAZ(e.date)}
+                      </td>
+                      <td className="py-3 px-4">
+                        <span className="font-semibold text-[11px] px-2.5 py-0.5 rounded-[8px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-white whitespace-nowrap">
+                          {e.category}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 font-medium text-[#171717] dark:text-zinc-200 max-w-sm truncate">
+                        {e.note || '—'}
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-[#E32636] whitespace-nowrap">
+                        {formatAZN(e.amount)}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-[11px] text-[#888888]">
+                        @{e.createdBy}
+                      </td>
+                      {isAdmin && (
+                        <td className="py-3 px-4 text-center">
+                          {confirmDeleteId === e.id ? (
+                            <div className="inline-flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  deleteExpense(e.id);
+                                  setConfirmDeleteId(null);
+                                  showToast('success', 'Xərc qeydi silindi.');
+                                }}
+                                className="px-2 py-0.5 text-[10px] font-semibold bg-[#E32636] text-white rounded-[8px]"
+                              >
+                                Sil
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteId(null)}
+                                className="px-2 py-0.5 text-[10px] font-semibold bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-zinc-300 border border-[#E5E5E5] dark:border-[#2E2E2E] rounded-[8px]"
+                              >
+                                Yox
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteId(e.id)}
+                              className="p-1.5 text-[#E32636] hover:bg-[#E32636]/10 rounded-[8px] transition-colors"
+                              title="Sil"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <TablePagination
+              totalItems={filteredExpenses.length}
+              pageSize={PAGE_SIZE}
+              currentPage={safePage}
+              onPageChange={setCurrentPage}
+              primaryColor={primaryColor}
+            />
+          </>
         )}
       </div>
 
       {/* Modal: New Expense */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col">
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-              <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+          <div className="bg-white dark:bg-[#171717] w-full max-w-md rounded-[14px] shadow-2xl border border-[#E5E5E5] dark:border-[#262626] overflow-hidden flex flex-col">
+            <div className="px-6 py-4 border-b border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between">
+              <h3 className="text-base font-bold text-[#171717] dark:text-white">
                 Yeni Xərc Əlavə Et
               </h3>
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="p-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg"
+                className="p-1.5 text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[8px]"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -291,7 +322,7 @@ export const ExpensesView: React.FC = () => {
 
             <form onSubmit={handleSaveExpense} className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1.5">
                   Tarix *
                 </label>
                 <input
@@ -299,18 +330,18 @@ export const ExpensesView: React.FC = () => {
                   required
                   value={date}
                   onChange={e => setDate(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="w-full px-3.5 py-2.5 text-sm font-mono tabular-nums rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1.5">
                   Xərc Növü *
                 </label>
                 <select
                   value={category}
                   onChange={e => setCategory(e.target.value as ExpenseCategory)}
-                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="w-full px-3.5 py-2.5 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                 >
                   {EXPENSE_CATEGORIES.map(c => (
                     <option key={c} value={c}>
@@ -321,7 +352,7 @@ export const ExpensesView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1.5">
                   Məbləğ (AZN) *
                 </label>
                 <input
@@ -332,12 +363,12 @@ export const ExpensesView: React.FC = () => {
                   value={amount}
                   onChange={e => setAmount(e.target.value)}
                   placeholder="məs: 25.00"
-                  className="w-full px-3.5 py-2 text-sm font-mono font-bold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="w-full px-3.5 py-2.5 text-sm font-mono tabular-nums font-bold rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white placeholder:text-[#888888] focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1.5">
                   Qeyd və Təyinat
                 </label>
                 <input
@@ -345,22 +376,22 @@ export const ExpensesView: React.FC = () => {
                   value={note}
                   onChange={e => setNote(e.target.value)}
                   placeholder="məs: Bar soyuducusunun təmiri"
-                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="w-full px-3.5 py-2.5 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white placeholder:text-[#888888] focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                 />
               </div>
 
-              <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-2">
+              <div className="pt-3 border-t border-[#E5E5E5] dark:border-[#262626] flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-xl"
+                  className="px-4 py-2 text-xs font-semibold text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[10px]"
                 >
                   Ləğv et
                 </button>
                 <button
                   type="submit"
                   style={{ backgroundColor: primaryColor }}
-                  className="px-5 py-2 text-xs font-bold text-white rounded-xl shadow-md hover:opacity-90"
+                  className="px-5 py-2 text-xs font-semibold text-white rounded-[10px] hover:opacity-90"
                 >
                   Xərci Saxla
                 </button>

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   BookOpen,
   Plus,
@@ -33,6 +33,7 @@ import { formatAZN, formatDateAZ, getCurrentTimeHHMM, getTodayISODate } from '..
 import { checkCustomerDebt, calculateDebtOverview } from '../utils/financialCalculations';
 import { calculateProductStock } from '../utils/stockCalculations';
 import { DebtWarningModal } from '../components/DebtWarningModal';
+import { TablePagination } from '../components/TablePagination';
 import { exportDebtsToCSV } from '../utils/exportUtils';
 
 interface DebtorGroup {
@@ -51,8 +52,13 @@ interface DebtorGroup {
 }
 
 const round2 = (v: number) => Math.round(v * 100) / 100;
+const DEBTS_PAGE_SIZE = 15;
 
-export const DebtsView: React.FC = () => {
+export interface DebtsViewProps {
+  initialTab?: 'active_debtors' | 'settled_debtors' | 'records' | 'balances';
+}
+
+export const DebtsView: React.FC<DebtsViewProps> = ({ initialTab = 'active_debtors' }) => {
   const {
     debts,
     addDebt,
@@ -75,16 +81,30 @@ export const DebtsView: React.FC = () => {
 
   const isAdmin = currentUser?.role === 'admin';
   const todayISO = getTodayISODate();
-  const primaryColor = settings.primaryColor || '#dc2626';
+  const primaryColor = settings.primaryColor || '#E32636';
 
-  const [activeTab, setActiveTab] = useState<'active_debtors' | 'settled_debtors' | 'records' | 'balances'>('active_debtors');
+  const [activeTab, setActiveTab] = useState<'active_debtors' | 'settled_debtors' | 'records' | 'balances'>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'borcdadir' | 'qismen' | 'odanilib'>('all');
   const [dateFilter, setDateFilter] = useState('');
+  const [recordsPage, setRecordsPage] = useState(1);
+  const [balancesPage, setBalancesPage] = useState(1);
   const [expandedCustomerMap, setExpandedCustomerMap] = useState<Record<string, boolean>>({});
   const [expandedDebtMap, setExpandedDebtMap] = useState<Record<string, boolean>>({});
   const [confirmDeletePayId, setConfirmDeletePayId] = useState<string | null>(null);
   const [confirmDeleteCustId, setConfirmDeleteCustId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
+  useEffect(() => {
+    setRecordsPage(1);
+  }, [searchQuery, statusFilter, dateFilter]);
+
+  useEffect(() => {
+    setBalancesPage(1);
+  }, [searchQuery]);
 
   const toggleCustomerExpanded = (id: string) => {
     setExpandedCustomerMap(prev => ({ ...prev, [id]: !prev[id] }));
@@ -803,10 +823,10 @@ export const DebtsView: React.FC = () => {
     return (
       <div
         key={debtor.debtorName}
-        className={`p-5 rounded-2xl bg-white dark:bg-zinc-900 border flex flex-col justify-between space-y-4 transition-colors ${
+        className={`p-5 rounded-[14px] bg-white dark:bg-[#171717] border flex flex-col justify-between space-y-4 transition-colors duration-150 ${
           isArchiveCard
-            ? 'border-zinc-200 dark:border-zinc-800'
-            : 'border-red-200/90 dark:border-red-900/60'
+            ? 'border-[#E5E5E5] dark:border-[#262626]'
+            : 'border-red-300/80 dark:border-red-900/50'
         }`}
       >
         <div className="space-y-3">
@@ -814,16 +834,16 @@ export const DebtsView: React.FC = () => {
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-start gap-2.5 min-w-0">
               <div
-                className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                className={`w-9 h-9 rounded-[10px] flex items-center justify-center font-bold text-xs shrink-0 ${
                   isArchiveCard
                     ? 'bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800'
-                    : 'bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400 border border-red-200 dark:border-red-800'
+                    : 'bg-red-50 dark:bg-red-950/60 text-[#E32636] dark:text-red-400 border border-red-200 dark:border-red-900/60'
                 }`}
               >
                 {debtor.debtorName.charAt(0).toUpperCase()}
               </div>
               <div className="min-w-0">
-                <h4 className="text-sm font-bold text-zinc-900 dark:text-white truncate">
+                <h4 className="text-sm font-bold text-[#171717] dark:text-white truncate">
                   {debtor.debtorName}
                 </h4>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
@@ -847,25 +867,25 @@ export const DebtsView: React.FC = () => {
           </div>
 
           {/* 3-Column Financial Strip */}
-          <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 grid grid-cols-3 gap-2 text-xs">
+          <div className="p-3 rounded-[10px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] grid grid-cols-3 gap-2 text-xs">
             <div>
-              <span className="text-[10px] text-zinc-500 block uppercase font-semibold">Ümumi Borc</span>
-              <span className="font-mono tabular-nums font-bold text-zinc-900 dark:text-zinc-100">
+              <span className="text-[10px] text-[#888888] block uppercase font-semibold">Ümumi Borc</span>
+              <span className="font-mono tabular-nums font-bold text-[#171717] dark:text-neutral-100">
                 {formatAZN(debtor.totalDebt)}
               </span>
             </div>
             <div className="text-center">
-              <span className="text-[10px] text-zinc-500 block uppercase font-semibold">Ödənilən</span>
+              <span className="text-[10px] text-[#888888] block uppercase font-semibold">Ödənilən</span>
               <span className="font-mono tabular-nums font-bold text-emerald-600 dark:text-emerald-400">
                 {formatAZN(debtor.totalPaid)}
               </span>
             </div>
             <div className="text-right">
-              <span className="text-[10px] text-zinc-500 block uppercase font-semibold">Qalıq</span>
+              <span className="text-[10px] text-[#888888] block uppercase font-semibold">Qalıq</span>
               <span
                 className={`font-mono tabular-nums font-extrabold ${
                   debtor.remainingDebt > 0.009
-                    ? 'text-red-600 dark:text-red-400'
+                    ? 'text-[#E32636] dark:text-red-400'
                     : 'text-emerald-600 dark:text-emerald-400'
                 }`}
               >
@@ -924,15 +944,15 @@ export const DebtsView: React.FC = () => {
 
           {/* Expandable Payment History */}
           {isExpanded && (
-            <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 space-y-2">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 flex justify-between">
+            <div className="p-3 rounded-[10px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] space-y-2">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-[#888888] flex justify-between">
                 <span>Ödəniş Tarixçəsi</span>
                 <span>{debtor.allPayments.length} əd.</span>
               </div>
               {debtor.allPayments.length === 0 ? (
-                <p className="text-[11px] text-zinc-500">Hələ ödəniş qəbul edilməyib.</p>
+                <p className="text-[11px] text-[#888888]">Hələ ödəniş qəbul edilməyib.</p>
               ) : (
-                <div className="divide-y divide-zinc-200 dark:divide-zinc-800 max-h-44 overflow-y-auto pr-1">
+                <div className="divide-y divide-[#E5E5E5] dark:divide-[#2E2E2E] max-h-44 overflow-y-auto pr-1">
                   {debtor.allPayments.map(p => (
                     <div key={p.id} className="py-1.5 flex items-center justify-between gap-2 text-[11px]">
                       <div className="min-w-0">
@@ -1010,13 +1030,13 @@ export const DebtsView: React.FC = () => {
               type="button"
               onClick={() => openPayModal(debtor.activeRecords[0], debtor.activeRecords)}
               style={{ backgroundColor: primaryColor }}
-              className="flex-1 py-2 px-3 hover:opacity-95 text-white font-bold text-xs rounded-xl transition-all shadow-sm flex items-center justify-center gap-1.5 whitespace-nowrap"
+              className="flex-1 py-2 px-3 hover:opacity-95 text-white font-semibold text-xs rounded-[10px] transition-opacity flex items-center justify-center gap-1.5 whitespace-nowrap"
             >
               <DollarSign className="w-4 h-4" />
               <span>Ödəniş Qəbul Et</span>
             </button>
           ) : (
-            <div className="flex-1 py-2 px-3 bg-emerald-50 dark:bg-zinc-950 text-emerald-700 dark:text-emerald-400 font-bold text-xs rounded-xl text-center flex items-center justify-center gap-1 border border-emerald-200 dark:border-zinc-800 whitespace-nowrap">
+            <div className="flex-1 py-2 px-3 bg-emerald-50 dark:bg-[#222222] text-emerald-700 dark:text-emerald-400 font-semibold text-xs rounded-[10px] text-center flex items-center justify-center gap-1 border border-emerald-200 dark:border-[#2E2E2E] whitespace-nowrap">
               <CheckCircle className="w-3.5 h-3.5" />
               <span>Tam Ödənilib (Arxiv)</span>
             </div>
@@ -1025,7 +1045,7 @@ export const DebtsView: React.FC = () => {
           <button
             type="button"
             onClick={() => toggleDebtExpanded(cardKey)}
-            className="py-2 px-2.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-semibold text-xs rounded-xl flex items-center gap-1 shrink-0"
+            className="py-2 px-2.5 bg-[#F5F5F5] dark:bg-[#222222] hover:bg-neutral-200 dark:hover:bg-[#2a2a2a] border border-[#E5E5E5] dark:border-[#2E2E2E] text-[#171717] dark:text-neutral-300 font-semibold text-xs rounded-[10px] flex items-center gap-1 shrink-0 transition-colors"
             title="Tarixçəni aç"
           >
             <History className="w-3.5 h-3.5" />
@@ -1040,15 +1060,15 @@ export const DebtsView: React.FC = () => {
   return (
     <div className="space-y-6 pb-12 max-w-7xl mx-auto">
       {/* Header and Action Buttons */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-zinc-200 dark:border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#E5E5E5] dark:border-[#262626]">
         <div>
-          <h2 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight flex flex-wrap items-center gap-2">
+          <h2 className="text-xl sm:text-2xl font-bold text-[#171717] dark:text-white tracking-tight flex flex-wrap items-center gap-2.5">
             <span>Borc İdarəetməsi və Nisyə</span>
-            <span className="text-xs font-mono tabular-nums text-red-600 dark:text-red-400 font-bold px-2 py-0.5 rounded-md bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900/60">
+            <span className="text-xs font-mono tabular-nums text-[#E32636] dark:text-red-400 font-semibold px-2.5 py-0.5 rounded-[8px] bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900/60">
               {activeDebtors.length} aktiv borclu
             </span>
           </h2>
-          <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400 mt-0.5">
+          <p className="text-xs sm:text-sm text-[#888888] mt-0.5">
             Aktiv borclar, qismən/tam ödənişlər, arxiv tarixçəsi və müştəri balans hesabları
           </p>
         </div>
@@ -1057,7 +1077,7 @@ export const DebtsView: React.FC = () => {
           <button
             type="button"
             onClick={() => exportDebtsToCSV(activeDebts)}
-            className="px-3 py-1.5 text-xs font-semibold bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0"
+            className="px-3.5 py-2 text-xs font-semibold bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] hover:bg-[#F5F5F5] dark:hover:bg-[#222222] text-[#171717] dark:text-neutral-200 rounded-[10px] transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Excel / CSV</span>
@@ -1066,7 +1086,7 @@ export const DebtsView: React.FC = () => {
           <button
             type="button"
             onClick={() => openBalanceModal()}
-            className="px-3.5 py-1.5 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0"
+            className="px-3.5 py-2 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded-[10px] transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0"
           >
             <Wallet className="w-4 h-4" />
             <span>+ Balans Aç</span>
@@ -1092,7 +1112,7 @@ export const DebtsView: React.FC = () => {
               setIsAddModalOpen(true);
             }}
             style={{ backgroundColor: primaryColor }}
-            className="px-4 py-1.5 text-xs font-bold hover:opacity-95 text-white rounded-xl transition-all flex items-center gap-1.5 whitespace-nowrap shrink-0"
+            className="px-4 py-2 text-xs font-semibold hover:opacity-95 text-white rounded-[10px] transition-opacity flex items-center gap-1.5 whitespace-nowrap shrink-0"
           >
             <Plus className="w-4 h-4" />
             <span>Yeni Borc Yaz</span>
@@ -1101,21 +1121,21 @@ export const DebtsView: React.FC = () => {
       </div>
 
       {/* Clear Rule Banner: Borc vs Müştəri Balansı */}
-      <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-        <div className="flex items-start gap-2">
-          <BookOpen className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+      <div className="p-4 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+        <div className="flex items-start gap-2.5">
+          <BookOpen className="w-4 h-4 text-[#E32636] shrink-0 mt-0.5" />
           <div>
-            <strong className="text-zinc-900 dark:text-white">Borc (Nisyə):</strong>{' '}
-            <span className="text-zinc-600 dark:text-zinc-400">
+            <strong className="text-[#171717] dark:text-white">Borc (Nisyə):</strong>{' '}
+            <span className="text-[#888888]">
               Müştəri məhsulu alıb pulunu ödəmədikdə və ya qismən ödədikdə avtomatik yaranır. Ödənilən qism dərhal kassaya, qalan məbləğ isə borca yazılır.
             </span>
           </div>
         </div>
-        <div className="flex items-start gap-2">
+        <div className="flex items-start gap-2.5">
           <Wallet className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
           <div>
-            <strong className="text-zinc-900 dark:text-white">Müştəri Balansı (Avans):</strong>{' '}
-            <span className="text-zinc-600 dark:text-zinc-400">
+            <strong className="text-[#171717] dark:text-white">Müştəri Balansı (Avans):</strong>{' '}
+            <span className="text-[#888888]">
               Əvvəlcədən yatırılan vəsait satış deyil; balansdan məhsul götürüləndə satış dövriyyəsinə yazılır, kassaya yeni pul girmir.
             </span>
           </div>
@@ -1126,66 +1146,66 @@ export const DebtsView: React.FC = () => {
       {activeTab === 'balances' ? (
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-amber-200 dark:border-amber-900/60 flex items-center justify-between">
+            <div className="p-5 rounded-[14px] bg-white dark:bg-[#171717] border border-amber-200 dark:border-amber-900/50 flex items-center justify-between">
               <div>
-                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                <span className="text-[11px] font-semibold text-[#888888] uppercase tracking-wider">
                   Ümumi Aktiv Balans
                 </span>
-                <div className="text-2xl font-black text-amber-600 dark:text-amber-400 font-mono tabular-nums mt-1">
+                <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 font-mono tabular-nums mt-1">
                   {formatAZN(totalCustomerBalance)}
                 </div>
-                <p className="text-xs text-zinc-500 mt-0.5">Müştərilərin hesabında qalan vəsait</p>
+                <p className="text-xs text-[#888888] mt-0.5">Müştərilərin hesabında qalan vəsait</p>
               </div>
-              <div className="w-11 h-11 rounded-xl bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-200 dark:border-amber-900/60">
+              <div className="w-11 h-11 rounded-[10px] bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center border border-amber-200 dark:border-amber-900/60">
                 <Wallet className="w-5 h-5" />
               </div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+            <div className="p-5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between">
               <div>
-                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                <span className="text-[11px] font-semibold text-[#888888] uppercase tracking-wider">
                   Balans Hesabları
                 </span>
-                <div className="text-2xl font-black text-zinc-900 dark:text-white font-mono tabular-nums mt-1">
+                <div className="text-2xl font-bold text-[#171717] dark:text-white font-mono tabular-nums mt-1">
                   {customerAccounts.length} nəfər
                 </div>
-                <p className="text-xs text-zinc-500 mt-0.5">
-                  Qoyulan cəm: <strong className="font-mono">{formatAZN(totalCustomerDeposited)}</strong>
+                <p className="text-xs text-[#888888] mt-0.5">
+                  Qoyulan cəm: <strong className="font-mono text-[#171717] dark:text-neutral-200">{formatAZN(totalCustomerDeposited)}</strong>
                 </p>
               </div>
-              <div className="w-11 h-11 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 flex items-center justify-center">
+              <div className="w-11 h-11 rounded-[10px] bg-[#F5F5F5] dark:bg-[#222222] text-[#888888] flex items-center justify-center border border-[#E5E5E5] dark:border-[#2E2E2E]">
                 <User className="w-5 h-5" />
               </div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+            <div className="p-5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between">
               <div>
-                <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                <span className="text-[11px] font-semibold text-[#888888] uppercase tracking-wider">
                   Məhsul & Pul Çıxarışları
                 </span>
-                <div className="text-2xl font-black text-cyan-600 dark:text-cyan-400 font-mono tabular-nums mt-1">
+                <div className="text-2xl font-bold text-cyan-600 dark:text-cyan-400 font-mono tabular-nums mt-1">
                   {formatAZN(totalCustomerSpent)}
                 </div>
-                <p className="text-xs text-zinc-500 mt-0.5 font-mono tabular-nums">
+                <p className="text-xs text-[#888888] mt-0.5 font-mono tabular-nums">
                   Sərbəst pul çıxışı: <strong className="text-rose-600 dark:text-rose-400">{formatAZN(totalCustomerWithdrawn)}</strong>
                 </p>
               </div>
-              <div className="w-11 h-11 rounded-xl bg-cyan-50 dark:bg-cyan-950/60 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-200 dark:border-cyan-900/60">
+              <div className="w-11 h-11 rounded-[10px] bg-cyan-50 dark:bg-cyan-950/60 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-200 dark:border-cyan-900/60">
                 <Coins className="w-5 h-5" />
               </div>
             </div>
           </div>
 
           {/* Dedicated Balance Action Toolbar */}
-          <div className="p-3.5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-3">
-            <div className="text-xs text-zinc-600 dark:text-zinc-400">
-              <strong className="text-zinc-900 dark:text-white">Balans Əməliyyatları:</strong> Balans aç/artır, depodan məhsul çıxar və ya sərbəst pul çıxarışı icra et.
+          <div className="p-4 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] flex flex-wrap items-center justify-between gap-3">
+            <div className="text-xs text-[#888888]">
+              <strong className="text-[#171717] dark:text-white">Balans Əməliyyatları:</strong> Balans aç/artır, depodan məhsul çıxar və ya sərbəst pul çıxarışı icra et.
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => openBalanceModal()}
-                className="px-3.5 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-xl transition-all flex items-center gap-1.5 whitespace-nowrap shadow-xs"
+                className="px-3.5 py-2 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded-[10px] transition-colors flex items-center gap-1.5 whitespace-nowrap"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Balans Aç / Artır</span>
@@ -1194,7 +1214,7 @@ export const DebtsView: React.FC = () => {
                 type="button"
                 onClick={() => openProductOutModal()}
                 disabled={customerAccounts.length === 0 || products.length === 0}
-                className="px-3.5 py-2 text-xs font-bold bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white rounded-xl transition-all flex items-center gap-1.5 whitespace-nowrap shadow-xs"
+                className="px-3.5 py-2 text-xs font-semibold bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white rounded-[10px] transition-colors flex items-center gap-1.5 whitespace-nowrap"
               >
                 <ShoppingBag className="w-3.5 h-3.5" />
                 <span>Məhsul Çıxar</span>
@@ -1203,7 +1223,7 @@ export const DebtsView: React.FC = () => {
                 type="button"
                 onClick={() => openCashOutModal()}
                 disabled={customerAccounts.length === 0}
-                className="px-3.5 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-xl transition-all flex items-center gap-1.5 whitespace-nowrap shadow-xs"
+                className="px-3.5 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-[10px] transition-colors flex items-center gap-1.5 whitespace-nowrap"
               >
                 <ArrowUpRight className="w-3.5 h-3.5" />
                 <span>Pul Çıxar</span>
@@ -1213,53 +1233,53 @@ export const DebtsView: React.FC = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+          <div className="p-5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between">
             <div>
-              <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+              <span className="text-[11px] font-semibold text-[#888888] uppercase tracking-wider">
                 Aktiv Qalıq Borclar
               </span>
-              <div className="text-2xl font-black text-red-600 dark:text-red-500 font-mono tabular-nums mt-1">
+              <div className="text-2xl font-bold text-[#E32636] dark:text-red-400 font-mono tabular-nums mt-1">
                 {formatAZN(overview.totalRemainingDebt)}
               </div>
-              <p className="text-xs text-zinc-500 mt-0.5">
+              <p className="text-xs text-[#888888] mt-0.5">
                 {activeDebtors.length} aktiv borclu · {overview.partialCount} qismən
               </p>
             </div>
-            <div className="w-11 h-11 rounded-xl bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400 flex items-center justify-center border border-red-200 dark:border-red-900/60">
+            <div className="w-11 h-11 rounded-[10px] bg-red-50 dark:bg-red-950/60 text-[#E32636] dark:text-red-400 flex items-center justify-center border border-red-200 dark:border-red-900/60">
               <AlertTriangle className="w-5 h-5" />
             </div>
           </div>
 
-          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-emerald-200 dark:border-emerald-900/60 flex items-center justify-between">
+          <div className="p-5 rounded-[14px] bg-white dark:bg-[#171717] border border-emerald-200 dark:border-emerald-900/50 flex items-center justify-between">
             <div>
-              <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+              <span className="text-[11px] font-semibold text-[#888888] uppercase tracking-wider">
                 Bu Gün Qəbul Edilən Ödənişlər
               </span>
-              <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400 font-mono tabular-nums mt-1">
+              <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 font-mono tabular-nums mt-1">
                 {formatAZN(todayCollectedSummary.total)}
               </div>
-              <p className="text-xs text-zinc-500 mt-0.5">
+              <p className="text-xs text-[#888888] mt-0.5">
                 {todayCollectedSummary.count} borc ödənişi (kassaya əlavə)
               </p>
             </div>
-            <div className="w-11 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-900/60">
+            <div className="w-11 h-11 rounded-[10px] bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center border border-emerald-200 dark:border-emerald-900/60">
               <CheckCircle className="w-5 h-5" />
             </div>
           </div>
 
-          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+          <div className="p-5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between">
             <div>
-              <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+              <span className="text-[11px] font-semibold text-[#888888] uppercase tracking-wider">
                 Ümumi Ödənilmiş Borc
               </span>
-              <div className="text-2xl font-black text-zinc-900 dark:text-white font-mono tabular-nums mt-1">
+              <div className="text-2xl font-bold text-[#171717] dark:text-white font-mono tabular-nums mt-1">
                 {formatAZN(overview.totalPaidDebt)}
               </div>
-              <p className="text-xs text-zinc-500 mt-0.5">
+              <p className="text-xs text-[#888888] mt-0.5">
                 {settledDebtors.length} tam bağlanan müştəri
               </p>
             </div>
-            <div className="w-11 h-11 rounded-xl bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 flex items-center justify-center">
+            <div className="w-11 h-11 rounded-[10px] bg-[#F5F5F5] dark:bg-[#222222] text-[#888888] flex items-center justify-center border border-[#E5E5E5] dark:border-[#2E2E2E]">
               <BookOpen className="w-5 h-5" />
             </div>
           </div>
@@ -1268,15 +1288,15 @@ export const DebtsView: React.FC = () => {
 
       {/* Tabs & Search Strip */}
       <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center p-1 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl gap-1">
+        <div className="flex flex-wrap items-center p-1 bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] rounded-[12px] gap-1">
           <button
             type="button"
             onClick={() => setActiveTab('active_debtors')}
             style={activeTab === 'active_debtors' ? { backgroundColor: primaryColor } : undefined}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-[8px] transition-colors whitespace-nowrap ${
               activeTab === 'active_debtors'
-                ? 'text-white shadow-sm'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                ? 'text-white'
+                : 'text-[#888888] hover:text-[#171717] dark:hover:text-white'
             }`}
           >
             Aktiv Borclular ({activeDebtors.length})
@@ -1285,10 +1305,10 @@ export const DebtsView: React.FC = () => {
           <button
             type="button"
             onClick={() => setActiveTab('settled_debtors')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-[8px] transition-colors flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'settled_debtors'
-                ? 'bg-emerald-600 text-white shadow-sm'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                ? 'bg-emerald-600 text-white'
+                : 'text-[#888888] hover:text-[#171717] dark:hover:text-white'
             }`}
           >
             <Archive className="w-3.5 h-3.5" />
@@ -1299,10 +1319,10 @@ export const DebtsView: React.FC = () => {
             type="button"
             onClick={() => setActiveTab('records')}
             style={activeTab === 'records' ? { backgroundColor: primaryColor } : undefined}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all whitespace-nowrap ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-[8px] transition-colors whitespace-nowrap ${
               activeTab === 'records'
-                ? 'text-white shadow-sm'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                ? 'text-white'
+                : 'text-[#888888] hover:text-[#171717] dark:hover:text-white'
             }`}
           >
             Bütün Qeydlər ({activeDebts.length})
@@ -1311,10 +1331,10 @@ export const DebtsView: React.FC = () => {
           <button
             type="button"
             onClick={() => setActiveTab('balances')}
-            className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5 whitespace-nowrap ${
+            className={`px-3 py-1.5 text-xs font-semibold rounded-[8px] transition-colors flex items-center gap-1.5 whitespace-nowrap ${
               activeTab === 'balances'
-                ? 'bg-amber-600 text-white shadow-sm'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
+                ? 'bg-amber-600 text-white'
+                : 'text-[#888888] hover:text-[#171717] dark:hover:text-white'
             }`}
           >
             <Wallet className="w-3.5 h-3.5" />
@@ -1325,13 +1345,13 @@ export const DebtsView: React.FC = () => {
         {/* Search, Status & Date Filters */}
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative flex-1 sm:w-56">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#888888]" />
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder="Ad və ya telefonla axtar..."
-              className="w-full pl-9 pr-3 py-1.5 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="w-full pl-9 pr-3 py-2 text-xs rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
             />
           </div>
 
@@ -1342,7 +1362,7 @@ export const DebtsView: React.FC = () => {
                 setStatusFilter(e.target.value as 'all' | 'borcdadir' | 'qismen' | 'odanilib')
               }
               aria-label="Status filtri"
-              className="px-2.5 py-1.5 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+              className="px-3 py-2 text-xs rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
             >
               <option value="all">Bütün Statuslar</option>
               <option value="borcdadir">Aktiv</option>
@@ -1358,14 +1378,14 @@ export const DebtsView: React.FC = () => {
                 value={dateFilter}
                 onChange={e => setDateFilter(e.target.value)}
                 aria-label="Tarix filtri"
-                className="px-2.5 py-1.5 text-xs font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white"
+                className="px-3 py-2 text-xs font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
               />
               {dateFilter && (
                 <button
                   type="button"
                   onClick={() => setDateFilter('')}
                   title="Tarix filtrini təmizlə"
-                  className="p-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
+                  className="p-2 rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#222222] text-[#888888] hover:text-[#171717] dark:hover:text-white"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -1379,9 +1399,9 @@ export const DebtsView: React.FC = () => {
       {activeTab === 'active_debtors' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredActiveDebtors.length === 0 ? (
-            <div className="col-span-full py-16 text-center bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 text-zinc-500 text-xs space-y-2">
+            <div className="col-span-full py-16 text-center bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] text-[#888888] text-xs space-y-2">
               <CheckCircle className="w-10 h-10 mx-auto text-emerald-500/70" />
-              <p className="font-semibold text-zinc-700 dark:text-zinc-300">
+              <p className="font-semibold text-[#171717] dark:text-neutral-300">
                 Aktiv ödənilməmiş borcu olan müştəri yoxdur.
               </p>
               <p>Bağlanmış borclara baxmaq üçün “Tam Ödənilib · Arxiv” bölməsini aça bilərsiniz.</p>
@@ -1396,8 +1416,8 @@ export const DebtsView: React.FC = () => {
       {activeTab === 'settled_debtors' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {filteredSettledDebtors.length === 0 ? (
-            <div className="col-span-full py-16 text-center bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 text-zinc-500 text-xs space-y-2">
-              <Archive className="w-10 h-10 mx-auto text-zinc-400" />
+            <div className="col-span-full py-16 text-center bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] text-[#888888] text-xs space-y-2">
+              <Archive className="w-10 h-10 mx-auto text-[#888888]" />
               <p>Tam ödənilmiş borc arxivi hələ boşdur.</p>
             </div>
           ) : (
@@ -1408,10 +1428,10 @@ export const DebtsView: React.FC = () => {
 
       {/* TAB: BÜTÜN BORC QEYDLƏRİ */}
       {activeTab === 'records' && (
-        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+        <div className="bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs min-w-[860px]">
-              <thead className="bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 font-bold uppercase tracking-wider text-[10px] border-b border-zinc-200 dark:border-zinc-800">
+              <thead className="bg-[#FAFAFA] dark:bg-[#141414] text-[#888888] font-semibold uppercase tracking-wider text-[10px] border-b border-[#E5E5E5] dark:border-[#262626]">
                 <tr>
                   <th className="py-3 px-4">Yaranma Tarixi</th>
                   <th className="py-3 px-4">Borclu & Telefon</th>
@@ -1424,15 +1444,17 @@ export const DebtsView: React.FC = () => {
                   <th className="py-3 px-4 text-center">Əməliyyat</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+              <tbody className="divide-y divide-[#E5E5E5] dark:divide-[#262626]">
                 {filteredRecords.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-12 text-center text-zinc-500">
+                    <td colSpan={9} className="py-12 text-center text-[#888888]">
                       Seçilmiş filtr üzrə borc qeydi tapılmadı.
                     </td>
                   </tr>
                 ) : (
-                  filteredRecords.map(d => {
+                  filteredRecords
+                    .slice((recordsPage - 1) * DEBTS_PAGE_SIZE, recordsPage * DEBTS_PAGE_SIZE)
+                    .map(d => {
                     const badge = getStatusBadge(d.status);
                     const isExpanded = expandedDebtMap[d.id] ?? false;
                     const paymentsCount = (d.payments || []).length;
@@ -1443,34 +1465,34 @@ export const DebtsView: React.FC = () => {
 
                     return (
                       <React.Fragment key={d.id}>
-                        <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40">
-                          <td className="py-3 px-4 font-mono tabular-nums text-zinc-500 dark:text-zinc-400 whitespace-nowrap">
+                        <tr className="hover:bg-[#FAFAFA] dark:hover:bg-[#1E1E1E] transition-colors">
+                          <td className="py-3 px-4 font-mono tabular-nums text-[#888888] whitespace-nowrap">
                             {formatDateAZ(d.date)}
                           </td>
                           <td className="py-3 px-4 whitespace-nowrap">
-                            <div className="font-bold text-zinc-900 dark:text-white">{d.debtorName}</div>
+                            <div className="font-semibold text-[#171717] dark:text-white">{d.debtorName}</div>
                             {d.debtorPhone && (
-                              <div className="text-[11px] font-mono text-zinc-500">{d.debtorPhone}</div>
+                              <div className="text-[11px] font-mono text-[#888888]">{d.debtorPhone}</div>
                             )}
                           </td>
-                          <td className="py-3 px-4 font-medium text-zinc-700 dark:text-zinc-300 max-w-xs">
+                          <td className="py-3 px-4 font-medium text-[#171717] dark:text-neutral-300 max-w-xs">
                             {d.items.map(i => `${i.productName} ×${i.quantity}`).join(', ')}
-                            {d.notes && <div className="text-[10px] text-zinc-500 italic">{d.notes}</div>}
+                            {d.notes && <div className="text-[10px] text-[#888888] italic">{d.notes}</div>}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-zinc-900 dark:text-white">
+                          <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-[#171717] dark:text-white">
                             {formatAZN(d.totalAmount)}
                           </td>
                           <td className="py-3 px-4 text-right font-mono tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">
                             {formatAZN(d.paidAmount)}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono tabular-nums font-extrabold text-red-600 dark:text-red-400">
+                          <td className="py-3 px-4 text-right font-mono tabular-nums font-bold text-[#E32636] dark:text-red-400">
                             {formatAZN(d.remainingAmount)}
                           </td>
-                          <td className="py-3 px-4 font-mono tabular-nums text-zinc-500 whitespace-nowrap">
+                          <td className="py-3 px-4 font-mono tabular-nums text-[#888888] whitespace-nowrap">
                             {latestPayment ? formatDateAZ(latestPayment) : '—'}
                           </td>
                           <td className="py-3 px-4 text-center whitespace-nowrap">
-                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${badge.cls}`}>
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-[8px] ${badge.cls}`}>
                               {badge.label}
                             </span>
                           </td>
@@ -1481,7 +1503,7 @@ export const DebtsView: React.FC = () => {
                                   type="button"
                                   onClick={() => openPayModal(d)}
                                   style={{ backgroundColor: primaryColor }}
-                                  className="px-2.5 py-1 hover:opacity-95 text-white font-bold text-[11px] rounded-lg transition-colors whitespace-nowrap"
+                                  className="px-2.5 py-1 hover:opacity-95 text-white font-semibold text-[11px] rounded-[8px] transition-opacity whitespace-nowrap"
                                 >
                                   Ödəniş al
                                 </button>
@@ -1489,7 +1511,7 @@ export const DebtsView: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => toggleDebtExpanded(d.id)}
-                                className="px-2 py-1 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-[11px] font-semibold rounded-lg inline-flex items-center gap-1"
+                                className="px-2 py-1 bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] hover:bg-neutral-200 dark:hover:bg-[#2a2a2a] text-[#171717] dark:text-neutral-300 text-[11px] font-semibold rounded-[8px] inline-flex items-center gap-1 transition-colors"
                               >
                                 <History className="w-3 h-3" />
                                 <span>{paymentsCount}</span>
@@ -1499,20 +1521,20 @@ export const DebtsView: React.FC = () => {
                         </tr>
 
                         {isExpanded && (
-                          <tr className="bg-zinc-50/80 dark:bg-zinc-950/70">
+                          <tr className="bg-[#FAFAFA] dark:bg-[#141414]">
                             <td colSpan={9} className="px-6 py-3">
                               <div className="space-y-2">
-                                <div className="text-[11px] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                                <div className="text-[11px] font-semibold text-[#888888] uppercase tracking-wider">
                                   Ödəniş Tarixçəsi ({paymentsCount})
                                 </div>
                                 {paymentsCount === 0 ? (
-                                  <p className="text-xs text-zinc-500">Bu borc üzrə hələ ödəniş qeyd edilməyib.</p>
+                                  <p className="text-xs text-[#888888]">Bu borc üzrə hələ ödəniş qeyd edilməyib.</p>
                                 ) : (
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                     {(d.payments || []).map(p => (
                                       <div
                                         key={p.id}
-                                        className="p-2.5 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3"
+                                        className="p-2.5 rounded-[10px] bg-white dark:bg-[#1E1E1E] border border-[#E5E5E5] dark:border-[#2E2E2E] flex items-center justify-between gap-3"
                                       >
                                         <div className="space-y-0.5 min-w-0">
                                           <div className="flex flex-wrap items-center gap-1.5">
@@ -1592,6 +1614,13 @@ export const DebtsView: React.FC = () => {
               </tbody>
             </table>
           </div>
+          <TablePagination
+            totalItems={filteredRecords.length}
+            pageSize={DEBTS_PAGE_SIZE}
+            currentPage={recordsPage}
+            onPageChange={setRecordsPage}
+            primaryColor={primaryColor}
+          />
         </div>
       )}
 
@@ -1599,20 +1628,22 @@ export const DebtsView: React.FC = () => {
       {activeTab === 'balances' && (
         <div className="space-y-4">
           {filteredCustomerAccounts.length === 0 ? (
-            <div className="py-16 text-center bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 text-zinc-500 text-xs space-y-3">
-              <Wallet className="w-10 h-10 mx-auto text-zinc-400 dark:text-zinc-600" />
+            <div className="py-16 text-center bg-white dark:bg-[#171717] rounded-[14px] border border-[#E5E5E5] dark:border-[#262626] text-[#888888] text-xs space-y-3">
+              <Wallet className="w-10 h-10 mx-auto text-[#888888]" />
               <p>Müştəri balansı tapılmadı.</p>
               <button
                 type="button"
                 onClick={() => openBalanceModal()}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs"
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-[10px] text-xs transition-colors"
               >
                 + İlk Müştəri Balansını Aç
               </button>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {filteredCustomerAccounts.map(customer => {
+              {filteredCustomerAccounts
+                .slice((balancesPage - 1) * DEBTS_PAGE_SIZE, balancesPage * DEBTS_PAGE_SIZE)
+                .map(customer => {
                 const isExpanded = expandedCustomerMap[customer.id] ?? false;
                 const transactions = [...(customer.transactions || [])].sort((a, b) => {
                   const dCmp = (b.date || '').localeCompare(a.date || '');
@@ -1630,16 +1661,16 @@ export const DebtsView: React.FC = () => {
                 return (
                   <div
                     key={customer.id}
-                    className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex flex-col justify-between space-y-4"
+                    className="p-5 rounded-[14px] bg-white dark:bg-[#171717] border border-[#E5E5E5] dark:border-[#262626] flex flex-col justify-between space-y-4"
                   >
                     <div className="space-y-3">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/80 flex items-center justify-center font-bold text-sm shrink-0">
+                          <div className="w-10 h-10 rounded-[10px] bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/80 flex items-center justify-center font-bold text-sm shrink-0">
                             {customer.name.charAt(0).toUpperCase()}
                           </div>
                           <div className="min-w-0">
-                            <h4 className="text-sm font-bold text-zinc-900 dark:text-white truncate">
+                            <h4 className="text-sm font-bold text-[#171717] dark:text-white truncate">
                               {customer.name}
                             </h4>
                             <div className="text-[11px] text-zinc-500 dark:text-zinc-400 flex flex-wrap items-center gap-1.5">
@@ -1706,16 +1737,16 @@ export const DebtsView: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800/80 flex items-center justify-between gap-2">
+                      <div className="p-3.5 rounded-[10px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] flex items-center justify-between gap-2">
                         <div>
-                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold uppercase tracking-wider block">
+                          <span className="text-[10px] text-[#888888] font-semibold uppercase tracking-wider block">
                             Cari Aktiv Balans
                           </span>
-                          <span className="text-2xl font-black font-mono tabular-nums text-amber-600 dark:text-amber-400">
+                          <span className="text-2xl font-bold font-mono tabular-nums text-amber-600 dark:text-amber-400">
                             {formatAZN(customer.balance)}
                           </span>
                         </div>
-                        <div className="text-right text-[11px] text-zinc-500 dark:text-zinc-400 space-y-0.5 font-mono tabular-nums">
+                        <div className="text-right text-[11px] text-[#888888] space-y-0.5 font-mono tabular-nums">
                           <p>
                             Qoyulan: <strong className="text-emerald-600 dark:text-emerald-400">{formatAZN(customer.totalDeposited)}</strong>
                           </p>
@@ -1729,18 +1760,18 @@ export const DebtsView: React.FC = () => {
                       </div>
 
                       {customer.notes && (
-                        <p className="text-[11px] text-zinc-500 dark:text-zinc-400 italic truncate">
+                        <p className="text-[11px] text-[#888888] italic truncate">
                           Qeyd: {customer.notes}
                         </p>
                       )}
 
                       {isExpanded && hasTransactions && (
-                        <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-950/80 border border-zinc-200 dark:border-zinc-800 text-xs space-y-2">
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex justify-between">
+                        <div className="p-3 rounded-[10px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] text-xs space-y-2">
+                          <div className="text-[10px] font-semibold uppercase tracking-wider text-[#888888] flex justify-between">
                             <span>Əməliyyat Tarixçəsi</span>
                             <span>{transactions.length} qeyd</span>
                           </div>
-                          <div className="divide-y divide-zinc-200 dark:divide-zinc-800/60 max-h-60 overflow-y-auto pr-1">
+                          <div className="divide-y divide-[#E5E5E5] dark:divide-[#2E2E2E] max-h-60 overflow-y-auto pr-1">
                             {transactions.map(tx => {
                               const badge = getBalanceTxBadge(tx);
                               return (
@@ -1787,12 +1818,12 @@ export const DebtsView: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
+                    <div className="pt-2 border-t border-[#E5E5E5] dark:border-[#262626] space-y-2">
                       <div className="grid grid-cols-3 gap-1.5">
                         <button
                           type="button"
                           onClick={() => openBalanceModal(customer)}
-                          className="py-2 px-2 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] rounded-xl transition-all flex items-center justify-center gap-1 whitespace-nowrap"
+                          className="py-2 px-2 bg-amber-600 hover:bg-amber-700 text-white font-semibold text-[11px] rounded-[10px] transition-colors flex items-center justify-center gap-1 whitespace-nowrap"
                         >
                           <Plus className="w-3.5 h-3.5" />
                           <span>Artır</span>
@@ -1801,7 +1832,7 @@ export const DebtsView: React.FC = () => {
                           type="button"
                           onClick={() => openProductOutModal(customer)}
                           disabled={products.length === 0 || customer.balance <= 0}
-                          className="py-2 px-2 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-45 text-white font-bold text-[11px] rounded-xl transition-all flex items-center justify-center gap-1 whitespace-nowrap"
+                          className="py-2 px-2 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-45 text-white font-semibold text-[11px] rounded-[10px] transition-colors flex items-center justify-center gap-1 whitespace-nowrap"
                           title="Balansdan məhsul çıxar"
                         >
                           <ShoppingBag className="w-3.5 h-3.5" />
@@ -1811,7 +1842,7 @@ export const DebtsView: React.FC = () => {
                           type="button"
                           onClick={() => openCashOutModal(customer)}
                           disabled={customer.balance <= 0}
-                          className="py-2 px-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-45 text-white font-bold text-[11px] rounded-xl transition-all flex items-center justify-center gap-1 whitespace-nowrap"
+                          className="py-2 px-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-45 text-white font-semibold text-[11px] rounded-[10px] transition-colors flex items-center justify-center gap-1 whitespace-nowrap"
                           title="Balansdan sərbəst pul çıxar"
                         >
                           <ArrowUpRight className="w-3.5 h-3.5" />
@@ -1823,7 +1854,7 @@ export const DebtsView: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => toggleCustomerExpanded(customer.id)}
-                          className="w-full py-1.5 px-3 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 font-semibold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                          className="w-full py-1.5 px-3 bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] hover:bg-neutral-200 dark:hover:bg-[#2a2a2a] text-[#171717] dark:text-neutral-300 font-semibold text-xs rounded-[10px] transition-colors flex items-center justify-center gap-1.5"
                         >
                           <History className="w-3.5 h-3.5" />
                           <span>{isExpanded ? 'Tarixçəni Bağla' : `Tarixçəni Gör (${transactions.length})`}</span>
@@ -1836,26 +1867,37 @@ export const DebtsView: React.FC = () => {
               })}
             </div>
           )}
+          {filteredCustomerAccounts.length > DEBTS_PAGE_SIZE && (
+            <div className="rounded-[14px] overflow-hidden border border-[#E5E5E5] dark:border-[#262626]">
+              <TablePagination
+                totalItems={filteredCustomerAccounts.length}
+                pageSize={DEBTS_PAGE_SIZE}
+                currentPage={balancesPage}
+                onPageChange={setBalancesPage}
+                primaryColor={primaryColor}
+              />
+            </div>
+          )}
         </div>
       )}
 
       {/* Modal: New Debt */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-          <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
+          <div className="bg-white dark:bg-[#171717] w-full max-w-md rounded-[14px] shadow-2xl border border-[#E5E5E5] dark:border-[#262626] overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between shrink-0">
               <div>
-                <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                <h3 className="text-base font-bold text-[#171717] dark:text-white">
                   Yeni Nisyə (Borc) Qeydiyyatı
                 </h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                <p className="text-xs text-[#888888] mt-0.5">
                   Məhsul satışı seçildikdə anbar qalığı dərhal azalır
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsAddModalOpen(false)}
-                className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg"
+                className="p-1.5 text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[8px] transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1863,14 +1905,14 @@ export const DebtsView: React.FC = () => {
 
             <form onSubmit={handleCreateDebt} className="p-5 space-y-4 overflow-y-auto">
               {/* Entry Mode Switch */}
-              <div className="grid grid-cols-2 p-1 rounded-xl bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 gap-1">
+              <div className="grid grid-cols-2 p-1 rounded-[10px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] gap-1">
                 <button
                   type="button"
                   onClick={() => setDebtEntryMode('product')}
-                  className={`py-1.5 text-xs font-bold rounded-lg transition-colors ${
+                  className={`py-1.5 text-xs font-semibold rounded-[8px] transition-colors ${
                     debtEntryMode === 'product'
-                      ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-xs'
-                      : 'text-zinc-500'
+                      ? 'bg-white dark:bg-[#171717] text-[#171717] dark:text-white shadow-xs'
+                      : 'text-[#888888]'
                   }`}
                 >
                   Məhsul satışı (Stokdan çıx)
@@ -1878,10 +1920,10 @@ export const DebtsView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setDebtEntryMode('manual')}
-                  className={`py-1.5 text-xs font-bold rounded-lg transition-colors ${
+                  className={`py-1.5 text-xs font-semibold rounded-[8px] transition-colors ${
                     debtEntryMode === 'manual'
-                      ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-xs'
-                      : 'text-zinc-500'
+                      ? 'bg-white dark:bg-[#171717] text-[#171717] dark:text-white shadow-xs'
+                      : 'text-[#888888]'
                   }`}
                 >
                   Sərbəst / Əl ilə borc
@@ -1889,7 +1931,7 @@ export const DebtsView: React.FC = () => {
               </div>
 
               {addDebtError && (
-                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
+                <div className="p-3 rounded-[10px] bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
                   <span>{addDebtError}</span>
                 </div>
@@ -1897,7 +1939,7 @@ export const DebtsView: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-bold text-red-600 dark:text-red-400 uppercase tracking-wider mb-1">
+                  <label className="block text-[11px] font-semibold text-[#E32636] dark:text-red-400 uppercase tracking-wider mb-1">
                     Ad və Soyad *
                   </label>
                   <input
@@ -1906,11 +1948,11 @@ export const DebtsView: React.FC = () => {
                     value={debtorName}
                     onChange={e => handleDebtorNameTyping(e.target.value)}
                     placeholder="məs: Əli Həsənov"
-                    className="w-full px-3 py-2 text-sm font-semibold rounded-xl border border-red-300 dark:border-red-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    className="w-full px-3 py-2 text-sm font-semibold rounded-[10px] border border-red-300 dark:border-red-800 bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1">
+                  <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                     Telefon nömrəsi
                   </label>
                   <input
@@ -1918,20 +1960,20 @@ export const DebtsView: React.FC = () => {
                     value={debtorPhone}
                     onChange={e => setDebtorPhone(e.target.value)}
                     placeholder="050 000 00 00"
-                    className="w-full px-3 py-2 text-sm font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    className="w-full px-3 py-2 text-sm font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                   />
                 </div>
               </div>
 
               {debtEntryMode === 'product' ? (
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                  <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                     Götürdüyü Məhsul *
                   </label>
                   <select
                     value={selectedProductId}
                     onChange={e => handleProductChange(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    className="w-full px-3 py-2 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                   >
                     {products.map(p => (
                       <option key={p.id} value={p.id}>
@@ -1942,7 +1984,7 @@ export const DebtsView: React.FC = () => {
                 </div>
               ) : (
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                  <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                     Məhsul / Təsvir *
                   </label>
                   <input
@@ -1951,14 +1993,14 @@ export const DebtsView: React.FC = () => {
                     value={manualItemName}
                     onChange={e => setManualItemName(e.target.value)}
                     placeholder="məs: Köhnə borc qalığı və ya xidmət"
-                    className="w-full px-3 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white"
+                    className="w-full px-3 py-2 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                   />
                 </div>
               )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                  <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                     Say (ədəd) *
                   </label>
                   <input
@@ -1967,12 +2009,12 @@ export const DebtsView: React.FC = () => {
                     required
                     value={quantity}
                     onChange={e => handleQuantityChange(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    className="w-full px-3 py-2 text-sm font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                  <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                     Cəmi Məbləğ (AZN) *
                   </label>
                   <input
@@ -1982,14 +2024,14 @@ export const DebtsView: React.FC = () => {
                     required
                     value={customAmount}
                     onChange={e => setCustomAmount(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    className="w-full px-3 py-2 text-sm font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                  <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                     İlkin Ödənilən (AZN)
                   </label>
                   <input
@@ -1998,12 +2040,12 @@ export const DebtsView: React.FC = () => {
                     min="0"
                     value={initialPaid}
                     onChange={e => setInitialPaid(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    className="w-full px-3 py-2 text-sm font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                  <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                     Tarix
                   </label>
                   <input
@@ -2011,13 +2053,13 @@ export const DebtsView: React.FC = () => {
                     required
                     value={date}
                     onChange={e => setDate(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                    className="w-full px-3 py-2 text-sm font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                   Qeyd
                 </label>
                 <input
@@ -2025,22 +2067,22 @@ export const DebtsView: React.FC = () => {
                   value={notes}
                   onChange={e => setNotes(e.target.value)}
                   placeholder="məs: Sabah məşqə gələndə ödəyəcək"
-                  className="w-full px-3 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="w-full px-3 py-2 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-[#E32636]"
                 />
               </div>
 
-              <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-2">
+              <div className="pt-3 border-t border-[#E5E5E5] dark:border-[#262626] flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white rounded-xl"
+                  className="px-4 py-2 text-xs font-semibold text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[10px] transition-colors"
                 >
                   Ləğv et
                 </button>
                 <button
                   type="submit"
                   style={{ backgroundColor: primaryColor }}
-                  className="px-5 py-2 text-xs font-bold text-white rounded-xl shadow-sm"
+                  className="px-5 py-2 text-xs font-semibold text-white rounded-[10px] hover:opacity-95 transition-opacity"
                 >
                   Borc Yaz
                 </button>
@@ -2053,21 +2095,21 @@ export const DebtsView: React.FC = () => {
       {/* Modal: Accept Debt Payment On-Site */}
       {isPayModalOpen && selectedDebt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-          <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
+          <div className="bg-white dark:bg-[#171717] w-full max-w-md rounded-[14px] shadow-2xl border border-[#E5E5E5] dark:border-[#262626] overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between shrink-0">
               <div>
-                <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                <h3 className="text-base font-bold text-[#171717] dark:text-white">
                   Borc Ödənişinin Qəbulu
                 </h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                  Müştəri: <strong className="text-zinc-900 dark:text-white">{selectedDebt.debtorName}</strong>
+                <p className="text-xs text-[#888888] mt-0.5">
+                  Müştəri: <strong className="text-[#171717] dark:text-white">{selectedDebt.debtorName}</strong>
                   {selectedDebt.debtorPhone ? ` · ${selectedDebt.debtorPhone}` : ''}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsPayModalOpen(false)}
-                className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg"
+                className="p-1.5 text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[8px] transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2077,13 +2119,13 @@ export const DebtsView: React.FC = () => {
               {/* Selector when debtor has multiple open debts */}
               {debtorUnpaidOptions.length > 1 && (
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1">
+                  <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                     Hansı borc qeydi ödənilsin?
                   </label>
                   <select
                     value={selectedDebt.id}
                     onChange={e => handleSelectDebtInModal(e.target.value)}
-                    className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white"
+                    className="w-full px-3 py-2 text-xs rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   >
                     {debtorUnpaidOptions.map(opt => (
                       <option key={opt.id} value={opt.id}>
@@ -2094,12 +2136,12 @@ export const DebtsView: React.FC = () => {
                 </div>
               )}
 
-              <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+              <div className="p-4 rounded-[12px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] flex items-center justify-between">
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-zinc-500">
+                  <span className="text-[10px] uppercase font-semibold text-[#888888]">
                     Cari Qalıq Borc
                   </span>
-                  <div className="text-xl font-black font-mono tabular-nums text-red-600 dark:text-red-500">
+                  <div className="text-xl font-bold font-mono tabular-nums text-[#E32636] dark:text-red-400">
                     {formatAZN(selectedDebt.remainingAmount)}
                   </div>
                 </div>
@@ -2107,21 +2149,21 @@ export const DebtsView: React.FC = () => {
                   type="button"
                   onClick={() => setPaymentAmount(selectedDebt.remainingAmount.toFixed(2))}
                   style={{ backgroundColor: primaryColor }}
-                  className="px-3 py-1.5 text-xs font-bold text-white rounded-lg shadow-sm"
+                  className="px-3 py-1.5 text-xs font-semibold text-white rounded-[8px] hover:opacity-95 transition-opacity"
                 >
                   Tam Ödə
                 </button>
               </div>
 
               {paymentError && (
-                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
+                <div className="p-3 rounded-[10px] bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-xs flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
                   <span>{paymentError}</span>
                 </div>
               )}
 
               <div>
-                <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                   Ödənilən Məbləğ (AZN) *
                 </label>
                 <input
@@ -2135,12 +2177,12 @@ export const DebtsView: React.FC = () => {
                     setPaymentAmount(e.target.value);
                     setPaymentError(null);
                   }}
-                  className="w-full px-3.5 py-2 text-base font-mono tabular-nums font-bold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-3.5 py-2 text-base font-mono tabular-nums font-bold rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1.5">
+                <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1.5">
                   Ödəniş Növü *
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -2155,10 +2197,10 @@ export const DebtsView: React.FC = () => {
                       key={opt.id}
                       type="button"
                       onClick={() => setPaymentMethod(opt.id)}
-                      className={`py-2 px-2 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all ${
+                      className={`py-2 px-2 rounded-[10px] border text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
                         paymentMethod === opt.id
-                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                          : 'bg-zinc-50 dark:bg-zinc-950 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800'
+                          ? 'bg-emerald-600 text-white border-emerald-500'
+                          : 'bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-neutral-300 border-[#E5E5E5] dark:border-[#2E2E2E]'
                       }`}
                     >
                       {opt.icon}
@@ -2170,14 +2212,14 @@ export const DebtsView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                  <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                     Qəbul Edən Məsul
                   </label>
                   {isAdmin ? (
                     <select
                       value={paymentReceivedBy}
                       onChange={e => setPaymentReceivedBy(e.target.value)}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                     >
                       {users
                         .filter(u => u.isActive)
@@ -2192,30 +2234,30 @@ export const DebtsView: React.FC = () => {
                       type="text"
                       readOnly
                       value={currentUser?.name || currentUser?.username || 'isci'}
-                      className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400"
+                      className="w-full px-3 py-2 text-xs rounded-[10px] border border-[#E5E5E5] dark:border-[#262626] bg-[#F5F5F5] dark:bg-[#1E1E1E] text-[#888888]"
                     />
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                  <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                     Ödəniş Tarixi
                   </label>
                   <div className="relative">
-                    <Calendar className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+                    <Calendar className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-[#888888] pointer-events-none" />
                     <input
                       type="date"
                       required
                       value={paymentDate}
                       onChange={e => setPaymentDate(e.target.value)}
-                      className="w-full pl-8 pr-2.5 py-2 text-xs font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white"
+                      className="w-full pl-8 pr-2.5 py-2 text-xs font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                     />
                   </div>
                 </div>
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider mb-1">
+                <label className="block text-[11px] font-semibold text-[#888888] uppercase tracking-wider mb-1">
                   Qeyd (İstəyə görə)
                 </label>
                 <input
@@ -2223,22 +2265,22 @@ export const DebtsView: React.FC = () => {
                   value={paymentNote}
                   onChange={e => setPaymentNote(e.target.value)}
                   placeholder="məs: Yerindəcə nağd ödədi"
-                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="w-full px-3.5 py-2 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
 
-              <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-2">
+              <div className="pt-3 border-t border-[#E5E5E5] dark:border-[#262626] flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsPayModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white rounded-xl"
+                  className="px-4 py-2 text-xs font-semibold text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[10px] transition-colors"
                 >
                   Ləğv et
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmittingPayment}
-                  className="px-5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl shadow-sm"
+                  className="px-5 py-2 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-[10px] transition-colors"
                 >
                   {isSubmittingPayment ? 'Qeyd edilir...' : 'Ödənişi Təsdiqlə'}
                 </button>
@@ -2260,17 +2302,17 @@ export const DebtsView: React.FC = () => {
       {/* Modal: Open Balance / Deposit Top-up */}
       {isDepositModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-          <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
+          <div className="bg-white dark:bg-[#171717] w-full max-w-md rounded-[14px] shadow-2xl border border-[#E5E5E5] dark:border-[#262626] overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-600 text-white flex items-center justify-center">
+                <div className="w-9 h-9 rounded-[10px] bg-amber-600 text-white flex items-center justify-center">
                   <Coins className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                  <h3 className="text-base font-bold text-[#171717] dark:text-white">
                     {depositCustomerId ? 'Balansı Artır' : 'Yeni Müştəri Balansı Aç'}
                   </h3>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  <p className="text-xs text-[#888888] mt-0.5">
                     Faktiki tarix və saat üzrə balans əməliyyatı
                   </p>
                 </div>
@@ -2278,7 +2320,7 @@ export const DebtsView: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsDepositModalOpen(false)}
-                className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg"
+                className="p-1.5 text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[8px] transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2286,14 +2328,14 @@ export const DebtsView: React.FC = () => {
 
             <form onSubmit={handleDepositSubmit} className="p-5 space-y-4 text-xs overflow-y-auto">
               {depositError && (
-                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 font-semibold">
+                <div className="p-3 rounded-[10px] bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 font-semibold">
                   {depositError}
                 </div>
               )}
 
               {customerAccounts.length > 0 && (
                 <div>
-                  <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">
+                  <label className="block text-[#888888] font-semibold mb-1">
                     Mövcud Müştəri Seç (və ya yeni ad yaz)
                   </label>
                   <select
@@ -2310,7 +2352,7 @@ export const DebtsView: React.FC = () => {
                         setDepositPhone('');
                       }
                     }}
-                    className="w-full px-3.5 py-2 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    className="w-full px-3.5 py-2 text-xs rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   >
                     <option value="">+ Yeni müştəri hesabı aç</option>
                     {customerAccounts.map(c => (
@@ -2324,7 +2366,7 @@ export const DebtsView: React.FC = () => {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">
+                  <label className="block text-[#888888] font-semibold mb-1">
                     Müştərinin Adı *
                   </label>
                   <input
@@ -2334,11 +2376,11 @@ export const DebtsView: React.FC = () => {
                     value={depositName}
                     onChange={e => setDepositName(e.target.value)}
                     placeholder="məs: Əli"
-                    className="w-full px-3.5 py-2 text-sm font-semibold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white disabled:opacity-70 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    className="w-full px-3.5 py-2 text-sm font-semibold rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white disabled:opacity-70 focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">
+                  <label className="block text-[#888888] font-semibold mb-1">
                     Telefon (İstəyə görə)
                   </label>
                   <input
@@ -2346,13 +2388,13 @@ export const DebtsView: React.FC = () => {
                     value={depositPhone}
                     onChange={e => setDepositPhone(e.target.value)}
                     placeholder="050..."
-                    className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    className="w-full px-3.5 py-2 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">
+                <label className="block text-[#888888] font-semibold mb-1">
                   {depositCustomerId ? 'Əlavə Edilən Məbləğ (AZN) *' : 'İlkin Balans Məbləği (AZN)'}
                 </label>
                 <input
@@ -2362,7 +2404,7 @@ export const DebtsView: React.FC = () => {
                   required
                   value={depositAmount}
                   onChange={e => setDepositAmount(e.target.value)}
-                  className="w-full px-3.5 py-2.5 text-base font-mono font-bold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  className="w-full px-3.5 py-2.5 text-base font-mono font-bold rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
                 />
                 <div className="flex gap-2 mt-2">
                   {[5, 10, 20, 50].map(amt => (
@@ -2370,10 +2412,10 @@ export const DebtsView: React.FC = () => {
                       key={amt}
                       type="button"
                       onClick={() => setDepositAmount(String(amt))}
-                      className={`flex-1 py-1 rounded-lg border text-[11px] font-bold transition-colors ${
+                      className={`flex-1 py-1 rounded-[8px] border text-[11px] font-semibold transition-colors ${
                         Number(depositAmount) === amt
                           ? 'bg-amber-600 text-white border-amber-500'
-                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700'
+                          : 'bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-neutral-300 border-[#E5E5E5] dark:border-[#2E2E2E]'
                       }`}
                     >
                       {amt} AZN
@@ -2383,17 +2425,17 @@ export const DebtsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Ödəniş Üsulu</label>
+                <label className="block text-[#888888] font-semibold mb-1">Ödəniş Üsulu</label>
                 <div className="grid grid-cols-3 gap-2">
                   {(['naqd', 'kart', 'pos'] as const).map(pt => (
                     <button
                       key={pt}
                       type="button"
                       onClick={() => setDepositPaymentType(pt)}
-                      className={`py-2 rounded-xl border text-[11px] font-bold uppercase transition-all ${
+                      className={`py-2 rounded-[10px] border text-[11px] font-semibold uppercase transition-colors ${
                         depositPaymentType === pt
-                          ? 'bg-amber-600 text-white border-amber-500 shadow-sm'
-                          : 'bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
+                          ? 'bg-amber-600 text-white border-amber-500'
+                          : 'bg-[#F5F5F5] dark:bg-[#222222] text-[#888888] border-[#E5E5E5] dark:border-[#2E2E2E]'
                       }`}
                     >
                       {pt}
@@ -2404,27 +2446,27 @@ export const DebtsView: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Tarix</label>
+                  <label className="block text-[#888888] font-semibold mb-1">Tarix</label>
                   <input
                     type="date"
                     value={depositDate}
                     onChange={e => setDepositDate(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    className="w-full px-3 py-2 text-xs font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   />
                 </div>
                 <div>
-                  <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Saat</label>
+                  <label className="block text-[#888888] font-semibold mb-1">Saat</label>
                   <input
                     type="time"
                     value={depositTime}
                     onChange={e => setDepositTime(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    className="w-full px-3 py-2 text-xs font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">
+                <label className="block text-[#888888] font-semibold mb-1">
                   Qeyd (İstəyə görə)
                 </label>
                 <input
@@ -2432,22 +2474,22 @@ export const DebtsView: React.FC = () => {
                   value={depositNote}
                   onChange={e => setDepositNote(e.target.value)}
                   placeholder="məs: 5 noyabr ilkin depozit"
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                  className="w-full px-3.5 py-2.5 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                 />
               </div>
 
-              <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-2">
+              <div className="pt-3 border-t border-[#E5E5E5] dark:border-[#262626] flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsDepositModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white rounded-xl"
+                  className="px-4 py-2 text-xs font-semibold text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[10px] transition-colors"
                 >
                   Ləğv et
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmittingBalanceOp}
-                  className="px-5 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-xl shadow-sm"
+                  className="px-5 py-2 text-xs font-semibold bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-[10px] transition-colors"
                 >
                   {isSubmittingBalanceOp
                     ? 'Yadda saxlanır...'
@@ -2477,17 +2519,17 @@ export const DebtsView: React.FC = () => {
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-            <div className="bg-white dark:bg-zinc-900 w-full max-w-lg rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col max-h-[90vh]">
-              <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
+            <div className="bg-white dark:bg-[#171717] w-full max-w-lg rounded-[14px] shadow-2xl border border-[#E5E5E5] dark:border-[#262626] overflow-hidden flex flex-col max-h-[90vh]">
+              <div className="p-5 border-b border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-cyan-600 text-white flex items-center justify-center">
+                  <div className="w-9 h-9 rounded-[10px] bg-cyan-600 text-white flex items-center justify-center">
                     <ShoppingBag className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                    <h3 className="text-base font-bold text-[#171717] dark:text-white">
                       Balansdan Məhsul Çıxar
                     </h3>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                    <p className="text-xs text-[#888888] mt-0.5">
                       Məbləğ müştəri balansından, say isə depodan avtomatik çıxılır
                     </p>
                   </div>
@@ -2495,7 +2537,7 @@ export const DebtsView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsProductOutModalOpen(false)}
-                  className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg"
+                  className="p-1.5 text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[8px] transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -2503,20 +2545,20 @@ export const DebtsView: React.FC = () => {
 
               <form onSubmit={handleProductOutSubmit} className="p-5 space-y-4 text-xs overflow-y-auto">
                 {prodOutError && (
-                  <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 font-semibold">
+                  <div className="p-3 rounded-[10px] bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 font-semibold">
                     {prodOutError}
                   </div>
                 )}
 
                 <div>
-                  <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">
+                  <label className="block text-[#888888] font-semibold mb-1">
                     Müştəri Seçin *
                   </label>
                   <select
                     required
                     value={prodOutCustomerId}
                     onChange={e => setProdOutCustomerId(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-sm font-semibold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    className="w-full px-3.5 py-2.5 text-sm font-semibold rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   >
                     {customerAccounts.map(c => (
                       <option key={c.id} value={c.id}>
@@ -2527,14 +2569,14 @@ export const DebtsView: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">
+                  <label className="block text-[#888888] font-semibold mb-1">
                     Depodakı Məhsul *
                   </label>
                   <select
                     required
                     value={prodOutProductId}
                     onChange={e => setProdOutProductId(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-sm font-semibold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    className="w-full px-3.5 py-2.5 text-sm font-semibold rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   >
                     {products.map(p => {
                       const st = stockById[p.id] ?? 0;
@@ -2549,14 +2591,14 @@ export const DebtsView: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">
+                    <label className="block text-[#888888] font-semibold mb-1">
                       Miqdar (ədəd) *
                     </label>
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => setProdOutQty(String(Math.max(1, qtyNum - 1)))}
-                        className="p-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-700 dark:text-zinc-300"
+                        className="p-2.5 rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-neutral-300"
                       >
                         <Minus className="w-4 h-4" />
                       </button>
@@ -2567,12 +2609,12 @@ export const DebtsView: React.FC = () => {
                         required
                         value={prodOutQty}
                         onChange={e => setProdOutQty(e.target.value)}
-                        className="w-full px-3 py-2 text-center text-base font-mono font-bold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                        className="w-full px-3 py-2 text-center text-base font-mono font-bold rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                       />
                       <button
                         type="button"
                         onClick={() => setProdOutQty(String(qtyNum + 1))}
-                        className="p-2.5 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-700 dark:text-zinc-300"
+                        className="p-2.5 rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-neutral-300"
                       >
                         <Plus className="w-4 h-4" />
                       </button>
@@ -2580,12 +2622,12 @@ export const DebtsView: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">
+                    <label className="block text-[#888888] font-semibold mb-1">
                       Vahid Qiyməti & Ümumi Məbləğ
                     </label>
-                    <div className="px-3.5 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono tabular-nums">
-                      <div className="text-[11px] text-zinc-500">Vahid: {formatAZN(unitPrice)}</div>
-                      <div className="text-base font-black text-cyan-600 dark:text-cyan-400">
+                    <div className="px-3.5 py-2 rounded-[10px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] font-mono tabular-nums">
+                      <div className="text-[11px] text-[#888888]">Vahid: {formatAZN(unitPrice)}</div>
+                      <div className="text-base font-bold text-cyan-600 dark:text-cyan-400">
                         Cəmi: {formatAZN(totalCost)}
                       </div>
                     </div>
@@ -2593,25 +2635,25 @@ export const DebtsView: React.FC = () => {
                 </div>
 
                 {/* Live Impact Summary */}
-                <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 grid grid-cols-2 gap-3 font-mono tabular-nums">
+                <div className="p-3.5 rounded-[10px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] grid grid-cols-2 gap-3 font-mono tabular-nums">
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-zinc-500 block">Müştəri Balansı</span>
-                    <span className={`font-bold text-xs ${hasInsufficientBal ? 'text-red-600 dark:text-red-400' : 'text-zinc-900 dark:text-white'}`}>
+                    <span className="text-[10px] uppercase font-semibold text-[#888888] block">Müştəri Balansı</span>
+                    <span className={`font-bold text-xs ${hasInsufficientBal ? 'text-[#E32636] dark:text-red-400' : 'text-[#171717] dark:text-white'}`}>
                       {formatAZN(currentBal)} → {formatAZN(Math.max(0, newBal))}
                     </span>
                     {hasInsufficientBal && (
-                      <span className="block text-[10px] font-sans font-bold text-red-600 dark:text-red-400 mt-0.5">
+                      <span className="block text-[10px] font-sans font-bold text-[#E32636] dark:text-red-400 mt-0.5">
                         Balans kifayət etmir!
                       </span>
                     )}
                   </div>
                   <div>
-                    <span className="text-[10px] uppercase font-bold text-zinc-500 block">Depo Qalığı</span>
-                    <span className={`font-bold text-xs ${hasInsufficientStock ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                    <span className="text-[10px] uppercase font-semibold text-[#888888] block">Depo Qalığı</span>
+                    <span className={`font-bold text-xs ${hasInsufficientStock ? 'text-[#E32636] dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
                       {availableStock} əd. → {Math.max(0, newStock)} əd.
                     </span>
                     {hasInsufficientStock && (
-                      <span className="block text-[10px] font-sans font-bold text-red-600 dark:text-red-400 mt-0.5">
+                      <span className="block text-[10px] font-sans font-bold text-[#E32636] dark:text-red-400 mt-0.5">
                         Depoda stok çatmır!
                       </span>
                     )}
@@ -2620,48 +2662,48 @@ export const DebtsView: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Tarix</label>
+                    <label className="block text-[#888888] font-semibold mb-1">Tarix</label>
                     <input
                       type="date"
                       value={prodOutDate}
                       onChange={e => setProdOutDate(e.target.value)}
-                      className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Saat</label>
+                    <label className="block text-[#888888] font-semibold mb-1">Saat</label>
                     <input
                       type="time"
                       value={prodOutTime}
                       onChange={e => setProdOutTime(e.target.value)}
-                      className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Qeyd (İstəyə görə)</label>
+                  <label className="block text-[#888888] font-semibold mb-1">Qeyd (İstəyə görə)</label>
                   <input
                     type="text"
                     value={prodOutNote}
                     onChange={e => setProdOutNote(e.target.value)}
                     placeholder="məs: Məşq sonrası 2 ədəd su"
-                    className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    className="w-full px-3.5 py-2 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   />
                 </div>
 
-                <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-2">
+                <div className="pt-3 border-t border-[#E5E5E5] dark:border-[#262626] flex justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setIsProductOutModalOpen(false)}
-                    className="px-4 py-2 text-xs font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white rounded-xl"
+                    className="px-4 py-2 text-xs font-semibold text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[10px] transition-colors"
                   >
                     Ləğv et
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmittingBalanceOp || hasInsufficientBal || hasInsufficientStock || qtyNum <= 0}
-                    className="px-5 py-2 text-xs font-bold bg-cyan-600 hover:bg-cyan-700 disabled:opacity-45 text-white rounded-xl shadow-sm"
+                    className="px-5 py-2 text-xs font-semibold bg-cyan-600 hover:bg-cyan-700 disabled:opacity-45 text-white rounded-[10px] transition-colors"
                   >
                     {isSubmittingBalanceOp ? 'İcra edilir...' : `Məhsulu Çıxar (${formatAZN(totalCost)})`}
                   </button>
@@ -2681,17 +2723,17 @@ export const DebtsView: React.FC = () => {
 
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-            <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col max-h-[90vh]">
-              <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
+            <div className="bg-white dark:bg-[#171717] w-full max-w-md rounded-[14px] shadow-2xl border border-[#E5E5E5] dark:border-[#262626] overflow-hidden flex flex-col max-h-[90vh]">
+              <div className="p-5 border-b border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center">
+                  <div className="w-9 h-9 rounded-[10px] bg-rose-600 text-white flex items-center justify-center">
                     <ArrowUpRight className="w-5 h-5" />
                   </div>
                   <div>
-                    <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                    <h3 className="text-base font-bold text-[#171717] dark:text-white">
                       Balansdan Sərbəst Pul Çıxarışı
                     </h3>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                    <p className="text-xs text-[#888888] mt-0.5">
                       Satış gəliri deyil · Kassadan pul çıxışı kimi qeyd olunur
                     </p>
                   </div>
@@ -2699,7 +2741,7 @@ export const DebtsView: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsCashOutModalOpen(false)}
-                  className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg"
+                  className="p-1.5 text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[8px] transition-colors"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -2707,20 +2749,20 @@ export const DebtsView: React.FC = () => {
 
               <form onSubmit={handleCashOutSubmit} className="p-5 space-y-4 text-xs overflow-y-auto">
                 {cashOutError && (
-                  <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 font-semibold">
+                  <div className="p-3 rounded-[10px] bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 font-semibold">
                     {cashOutError}
                   </div>
                 )}
 
                 <div>
-                  <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">
+                  <label className="block text-[#888888] font-semibold mb-1">
                     Müştəri Seçin *
                   </label>
                   <select
                     required
                     value={cashOutCustomerId}
                     onChange={e => setCashOutCustomerId(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-sm font-semibold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    className="w-full px-3.5 py-2.5 text-sm font-semibold rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   >
                     {customerAccounts.map(c => (
                       <option key={c.id} value={c.id}>
@@ -2732,14 +2774,14 @@ export const DebtsView: React.FC = () => {
 
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-zinc-700 dark:text-zinc-300 font-bold">
+                    <label className="text-[#888888] font-semibold">
                       Çıxarılacaq Məbləğ (AZN) *
                     </label>
                     {selectedCust && (
                       <button
                         type="button"
                         onClick={() => setCashOutAmount(String(selectedCust.balance))}
-                        className="text-[11px] font-bold text-rose-600 dark:text-rose-400 hover:underline"
+                        className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline"
                       >
                         Tamını çıxar ({formatAZN(selectedCust.balance)})
                       </button>
@@ -2752,27 +2794,27 @@ export const DebtsView: React.FC = () => {
                     required
                     value={cashOutAmount}
                     onChange={e => setCashOutAmount(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-base font-mono font-bold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    className="w-full px-3.5 py-2.5 text-base font-mono font-bold rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   />
                   {selectedCust && (
-                    <div className={`mt-1.5 text-[11px] font-mono ${hasInsufficient ? 'text-red-600 dark:text-red-400 font-bold' : 'text-zinc-500'}`}>
+                    <div className={`mt-1.5 text-[11px] font-mono ${hasInsufficient ? 'text-[#E32636] dark:text-red-400 font-bold' : 'text-[#888888]'}`}>
                       Qalıq balans: {formatAZN(currentBal)} → {formatAZN(Math.max(0, round2(currentBal - amtNum)))}
                     </div>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Geri Ödəniş Üsulu</label>
+                  <label className="block text-[#888888] font-semibold mb-1">Geri Ödəniş Üsulu</label>
                   <div className="grid grid-cols-3 gap-2">
                     {(['naqd', 'kart', 'pos'] as const).map(pt => (
                       <button
                         key={pt}
                         type="button"
                         onClick={() => setCashOutMethod(pt)}
-                        className={`py-2 rounded-xl border text-[11px] font-bold uppercase transition-all ${
+                        className={`py-2 rounded-[10px] border text-[11px] font-semibold uppercase transition-colors ${
                           cashOutMethod === pt
-                            ? 'bg-rose-600 text-white border-rose-500 shadow-sm'
-                            : 'bg-zinc-50 dark:bg-zinc-950 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800'
+                            ? 'bg-rose-600 text-white border-rose-500'
+                            : 'bg-[#F5F5F5] dark:bg-[#222222] text-[#888888] border-[#E5E5E5] dark:border-[#2E2E2E]'
                         }`}
                       >
                         {pt}
@@ -2783,48 +2825,48 @@ export const DebtsView: React.FC = () => {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Tarix</label>
+                    <label className="block text-[#888888] font-semibold mb-1">Tarix</label>
                     <input
                       type="date"
                       value={cashOutDate}
                       onChange={e => setCashOutDate(e.target.value)}
-                      className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Saat</label>
+                    <label className="block text-[#888888] font-semibold mb-1">Saat</label>
                     <input
                       type="time"
                       value={cashOutTime}
                       onChange={e => setCashOutTime(e.target.value)}
-                      className="w-full px-3 py-2 text-xs font-mono rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                      className="w-full px-3 py-2 text-xs font-mono rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Qeyd (İstəyə görə)</label>
+                  <label className="block text-[#888888] font-semibold mb-1">Qeyd (İstəyə görə)</label>
                   <input
                     type="text"
                     value={cashOutNote}
                     onChange={e => setCashOutNote(e.target.value)}
                     placeholder="məs: Müştərinin tələbi ilə geri ödəniş"
-                    className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                    className="w-full px-3.5 py-2 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                   />
                 </div>
 
-                <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-2">
+                <div className="pt-3 border-t border-[#E5E5E5] dark:border-[#262626] flex justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setIsCashOutModalOpen(false)}
-                    className="px-4 py-2 text-xs font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white rounded-xl"
+                    className="px-4 py-2 text-xs font-semibold text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[10px] transition-colors"
                   >
                     Ləğv et
                   </button>
                   <button
                     type="submit"
                     disabled={isSubmittingBalanceOp || hasInsufficient || amtNum <= 0}
-                    className="px-5 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 disabled:opacity-45 text-white rounded-xl shadow-sm"
+                    className="px-5 py-2 text-xs font-semibold bg-rose-600 hover:bg-rose-700 disabled:opacity-45 text-white rounded-[10px] transition-colors"
                   >
                     {isSubmittingBalanceOp ? 'İcra edilir...' : `Pul Çıxar (${formatAZN(amtNum)})`}
                   </button>
@@ -2838,20 +2880,20 @@ export const DebtsView: React.FC = () => {
       {/* Modal: Edit Customer Metadata & Admin Balance Adjustment */}
       {isEditCustomerModalOpen && editCustTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs">
-          <div className="bg-white dark:bg-zinc-900 w-full max-w-md rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between shrink-0">
+          <div className="bg-white dark:bg-[#171717] w-full max-w-md rounded-[14px] shadow-2xl border border-[#E5E5E5] dark:border-[#262626] overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-[#E5E5E5] dark:border-[#262626] flex items-center justify-between shrink-0">
               <div>
-                <h3 className="text-base font-bold text-zinc-900 dark:text-white">
+                <h3 className="text-base font-bold text-[#171717] dark:text-white">
                   Müştəri Balansını Redaktə Et
                 </h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                <p className="text-xs text-[#888888] mt-0.5">
                   Tarixçə qorunur · Bütün düzəlişlər auditə yazılır
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setIsEditCustomerModalOpen(false)}
-                className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-white rounded-lg"
+                className="p-1.5 text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[8px] transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2859,49 +2901,49 @@ export const DebtsView: React.FC = () => {
 
             <form onSubmit={handleEditCustomerSubmit} className="p-5 space-y-4 text-xs overflow-y-auto">
               {editCustError && (
-                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 font-semibold">
+                <div className="p-3 rounded-[10px] bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-900 text-red-700 dark:text-red-300 font-semibold">
                   {editCustError}
                 </div>
               )}
 
               <div>
-                <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Müştərinin Adı *</label>
+                <label className="block text-[#888888] font-semibold mb-1">Müştərinin Adı *</label>
                 <input
                   type="text"
                   required
                   value={editCustName}
                   onChange={e => setEditCustName(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm font-semibold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                  className="w-full px-3.5 py-2 text-sm font-semibold rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                 />
               </div>
 
               <div>
-                <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Telefon</label>
+                <label className="block text-[#888888] font-semibold mb-1">Telefon</label>
                 <input
                   type="text"
                   value={editCustPhone}
                   onChange={e => setEditCustPhone(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                  className="w-full px-3.5 py-2 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                 />
               </div>
 
               <div>
-                <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">Hesab Qeydi</label>
+                <label className="block text-[#888888] font-semibold mb-1">Hesab Qeydi</label>
                 <input
                   type="text"
                   value={editCustNotes}
                   onChange={e => setEditCustNotes(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm rounded-xl border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                  className="w-full px-3.5 py-2 text-sm rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-[#F5F5F5] dark:bg-[#222222] text-[#171717] dark:text-white"
                 />
               </div>
 
-              <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 space-y-3">
-                <label className="flex items-center gap-2 font-bold text-zinc-800 dark:text-zinc-200 cursor-pointer">
+              <div className="p-3.5 rounded-[10px] bg-[#F5F5F5] dark:bg-[#222222] border border-[#E5E5E5] dark:border-[#2E2E2E] space-y-3">
+                <label className="flex items-center gap-2 font-semibold text-[#171717] dark:text-neutral-200 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={editCustAdjustEnabled}
                     onChange={e => setEditCustAdjustEnabled(e.target.checked)}
-                    className="rounded border-zinc-400"
+                    className="rounded border-[#888888]"
                   />
                   <span>Cari balansı düzəliş et (Hazırda: {formatAZN(editCustTarget.balance)})</span>
                 </label>
@@ -2909,7 +2951,7 @@ export const DebtsView: React.FC = () => {
                 {editCustAdjustEnabled && (
                   <div className="space-y-2.5">
                     <div>
-                      <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">
+                      <label className="block text-[#888888] font-semibold mb-1">
                         Yeni Balans Məbləği (AZN)
                       </label>
                       <input
@@ -2918,11 +2960,11 @@ export const DebtsView: React.FC = () => {
                         step="0.01"
                         value={editCustTargetBalance}
                         onChange={e => setEditCustTargetBalance(e.target.value)}
-                        className="w-full px-3 py-2 text-sm font-mono font-bold rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white"
+                        className="w-full px-3 py-2 text-sm font-mono font-bold rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#171717] text-[#171717] dark:text-white"
                       />
                     </div>
                     <div>
-                      <label className="block text-zinc-700 dark:text-zinc-300 font-bold mb-1">
+                      <label className="block text-[#888888] font-semibold mb-1">
                         Düzəliş Səbəbi *
                       </label>
                       <input
@@ -2931,18 +2973,18 @@ export const DebtsView: React.FC = () => {
                         value={editCustReason}
                         onChange={e => setEditCustReason(e.target.value)}
                         placeholder="məs: Səhv yazılmış əməliyyatın düzəldilməsi"
-                        className="w-full px-3 py-2 text-xs rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white"
+                        className="w-full px-3 py-2 text-xs rounded-[10px] border border-[#E5E5E5] dark:border-[#2E2E2E] bg-white dark:bg-[#171717] text-[#171717] dark:text-white"
                       />
                     </div>
                   </div>
                 )}
               </div>
 
-              <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-2">
+              <div className="pt-3 border-t border-[#E5E5E5] dark:border-[#262626] flex justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setIsEditCustomerModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold text-zinc-500 hover:text-zinc-900 dark:hover:text-white rounded-xl"
+                  className="px-4 py-2 text-xs font-semibold text-[#888888] hover:text-[#171717] dark:hover:text-white rounded-[10px] transition-colors"
                 >
                   Ləğv et
                 </button>
@@ -2950,7 +2992,7 @@ export const DebtsView: React.FC = () => {
                   type="submit"
                   disabled={isSubmittingBalanceOp}
                   style={{ backgroundColor: primaryColor }}
-                  className="px-5 py-2 text-xs font-bold text-white rounded-xl shadow-sm hover:opacity-90 disabled:opacity-50"
+                  className="px-5 py-2 text-xs font-semibold text-white rounded-[10px] hover:opacity-95 disabled:opacity-50 transition-opacity"
                 >
                   {isSubmittingBalanceOp ? 'Saxlanılır...' : 'Dəyişiklikləri Saxla'}
                 </button>

@@ -14,7 +14,7 @@ export const INITIAL_SETTINGS: AppSettings = {
   autoConfirmSales: true,
   barName: 'Zal Barı',
   enablePushNotifications: true,
-  primaryColor: '#dc2626',
+  primaryColor: '#E32636',
   logoSize: 'md',
 };
 
