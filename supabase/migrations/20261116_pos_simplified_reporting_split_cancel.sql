@@ -1,16 +1,29 @@
 -- =========================================================================
--- STRONGBAR — Satış, Qarışıq/Qismən Ödəniş, Ləğv Tarixçəsi, Borc və Balans İnteqrasiyası
--- Tarix: 2026-11-16
--- Qeyd: Mövcud datanı silmir (tam geriyə uyğun idempotent əlavə miqrasiya).
+-- STRONGBAR — Tam Müstəqil & İdempotent SQL Miqrasiyası
+-- Satış (6 ödəniş növü + Qarışıq), Borc (İlkin ödəniş ayrımı),
+-- Balans (Məhsul çıxarışı), Depo Hərəkətləri və Ləğv / Audit Tarixçəsi
+--
+-- Qeyd: Mövcud məlumatları SİLMİR. Əvvəlki miqrasiyalar işlədilməmiş olsa belə
+-- çatışmayan cədvəlləri (debt_payments, customer_balance_transactions,
+-- depo_movements) və sütunları təhlükəsiz şəkildə özü yaradır.
 -- =========================================================================
 
--- 1. Satışlar (public.sales) — qarışıq/qismən ödəniş bölgüsü və ləğv/redaktə tarixçəsi sütunları
+-- 1. Satışlar (public.sales) — bütün lazımi sütunlar və qarışıq/ləğv dəstəyi
 ALTER TABLE public.sales DROP CONSTRAINT IF EXISTS sales_payment_type_check;
 ALTER TABLE public.sales
   ADD CONSTRAINT sales_payment_type_check
   CHECK (payment_type IN ('naqd', 'kart', 'pos', 'borc', 'balans', 'qarisik'));
 
 ALTER TABLE public.sales
+  ADD COLUMN IF NOT EXISTS subtotal_amount NUMERIC(10, 2),
+  ADD COLUMN IF NOT EXISTS discount_amount NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS debtor_phone TEXT,
+  ADD COLUMN IF NOT EXISTS original_date TEXT,
+  ADD COLUMN IF NOT EXISTS date_changed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS is_confirmed BOOLEAN NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS confirmed_by TEXT,
   ADD COLUMN IF NOT EXISTS payment_split JSONB,
   ADD COLUMN IF NOT EXISTS is_cancelled BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ,
@@ -18,27 +31,157 @@ ALTER TABLE public.sales
   ADD COLUMN IF NOT EXISTS cancel_reason TEXT,
   ADD COLUMN IF NOT EXISTS edit_history JSONB NOT NULL DEFAULT '[]'::jsonb;
 
+CREATE INDEX IF NOT EXISTS idx_sales_date ON public.sales (date);
 CREATE INDEX IF NOT EXISTS idx_sales_date_cancelled ON public.sales (date, is_cancelled);
 
--- 2. Borclar (public.debts) & Borc Ödənişləri (public.debt_payments) — ilkin satış ödənişi və ləğv statusu
+-- 2. Borclar (public.debts) & Borc Ödənişləri (public.debt_payments)
 ALTER TABLE public.debts
+  ADD COLUMN IF NOT EXISTS debtor_phone TEXT,
+  ADD COLUMN IF NOT EXISTS sale_id TEXT,
+  ADD COLUMN IF NOT EXISTS notes TEXT,
+  ADD COLUMN IF NOT EXISTS payments JSONB NOT NULL DEFAULT '[]'::jsonb,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
   ADD COLUMN IF NOT EXISTS is_cancelled BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ,
   ADD COLUMN IF NOT EXISTS cancelled_by TEXT;
+
+CREATE TABLE IF NOT EXISTS public.debt_payments (
+  id TEXT PRIMARY KEY,
+  debt_id TEXT NOT NULL REFERENCES public.debts(id) ON DELETE CASCADE,
+  amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
+  payment_method TEXT NOT NULL DEFAULT 'naqd' CHECK (payment_method IN ('naqd', 'kart', 'pos', 'kocurme')),
+  received_by TEXT NOT NULL DEFAULT 'admin',
+  paid_at TEXT NOT NULL,
+  note TEXT,
+  is_upfront BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
 
 ALTER TABLE public.debt_payments
   ADD COLUMN IF NOT EXISTS is_upfront BOOLEAN NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS idx_debts_cancelled_status ON public.debts (is_cancelled, status);
+CREATE INDEX IF NOT EXISTS idx_debt_payments_debt_id ON public.debt_payments (debt_id);
+CREATE INDEX IF NOT EXISTS idx_debt_payments_paid_at ON public.debt_payments (paid_at);
 CREATE INDEX IF NOT EXISTS idx_debt_payments_upfront_date ON public.debt_payments (is_upfront, paid_at);
 
--- 3. Köhnə Depo hərəkət qeydlərinin mənbə etiketini yeni standartla sinxronlaşdır (mövcud dataya zərər vermədən)
+-- 3. Müştəri Hesabları (public.customer_accounts) & Balans Jurnalı (public.customer_balance_transactions)
+CREATE TABLE IF NOT EXISTS public.customer_accounts (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  phone TEXT,
+  balance NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  total_deposited NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  total_spent NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  total_withdrawn NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  opened_date TEXT,
+  notes TEXT,
+  transactions JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+  updated_by TEXT
+);
+
+ALTER TABLE public.customer_accounts
+  ADD COLUMN IF NOT EXISTS total_withdrawn NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS opened_date TEXT,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+  ADD COLUMN IF NOT EXISTS updated_by TEXT;
+
+CREATE TABLE IF NOT EXISTS public.customer_balance_transactions (
+  id TEXT PRIMARY KEY,
+  customer_id TEXT NOT NULL REFERENCES public.customer_accounts(id) ON DELETE CASCADE,
+  customer_name TEXT NOT NULL,
+  tx_type TEXT NOT NULL CHECK (tx_type IN ('open', 'deposit', 'withdraw', 'product_out', 'charge', 'adjustment')),
+  amount NUMERIC(10, 2) NOT NULL CHECK (amount >= 0),
+  balance_before NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  balance_after NUMERIC(10, 2) NOT NULL DEFAULT 0,
+  payment_method TEXT CHECK (payment_method IN ('naqd', 'kart', 'pos', 'kocurme', 'balans')),
+  product_id TEXT REFERENCES public.products(id) ON DELETE SET NULL,
+  product_name TEXT,
+  quantity INTEGER,
+  unit_price NUMERIC(10, 2),
+  sale_id TEXT,
+  tx_date TEXT NOT NULL,
+  tx_time TEXT NOT NULL DEFAULT '00:00',
+  note TEXT,
+  created_by TEXT NOT NULL DEFAULT 'admin',
+  idempotency_key TEXT UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+CREATE INDEX IF NOT EXISTS idx_cbt_customer_id ON public.customer_balance_transactions (customer_id);
+CREATE INDEX IF NOT EXISTS idx_cbt_tx_date ON public.customer_balance_transactions (tx_date);
+CREATE INDEX IF NOT EXISTS idx_cbt_tx_type ON public.customer_balance_transactions (tx_type);
+
+-- 4. Depo Hərəkət Jurnalı (public.depo_movements) — əgər yoxdursa yarat
+CREATE TABLE IF NOT EXISTS public.depo_movements (
+  id TEXT PRIMARY KEY,
+  movement_type TEXT NOT NULL CHECK (movement_type IN ('normal_sale_out', 'balance_product_out', 'purchase_in', 'manual_adjustment')),
+  product_id TEXT NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
+  product_name TEXT NOT NULL,
+  quantity_delta INTEGER NOT NULL,
+  stock_before INTEGER,
+  stock_after INTEGER,
+  unit_price NUMERIC(10, 2),
+  total_amount NUMERIC(10, 2),
+  customer_name TEXT,
+  reference_id TEXT,
+  movement_date TEXT NOT NULL,
+  movement_time TEXT NOT NULL DEFAULT '00:00',
+  source_label TEXT,
+  note TEXT,
+  created_by TEXT NOT NULL DEFAULT 'admin',
+  idempotency_key TEXT UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+CREATE INDEX IF NOT EXISTS idx_depo_movements_product_id ON public.depo_movements (product_id);
+CREATE INDEX IF NOT EXISTS idx_depo_movements_type ON public.depo_movements (movement_type);
+CREATE INDEX IF NOT EXISTS idx_depo_movements_date ON public.depo_movements (movement_date);
+
+-- Köhnə Depo hərəkət qeydlərinin mənbə etiketini yeni standartla sinxronlaşdır
 UPDATE public.depo_movements
 SET source_label = 'Müştəri balansından məhsul çıxarışı'
 WHERE movement_type = 'balance_product_out'
   AND source_label = 'Müştəri balansından çıxarış';
 
--- 4. Müştəri balansından məhsul çıxarışı RPC-si (Müştəri balansından məhsul çıxarışı + Ləğv olunmuş satış stoku nəzərə alınır)
+-- 5. Yeni Cədvəllər Üçün RLS Siyasətləri və Realtime Aktivləşdirilməsi
+ALTER TABLE public.debt_payments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Anon Select DebtPayments" ON public.debt_payments;
+CREATE POLICY "Anon Select DebtPayments" ON public.debt_payments FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Anon Modify DebtPayments" ON public.debt_payments;
+CREATE POLICY "Anon Modify DebtPayments" ON public.debt_payments FOR ALL USING (true);
+
+ALTER TABLE public.customer_balance_transactions ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Anon Select CustomerBalanceTx" ON public.customer_balance_transactions;
+CREATE POLICY "Anon Select CustomerBalanceTx" ON public.customer_balance_transactions FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Anon Modify CustomerBalanceTx" ON public.customer_balance_transactions;
+CREATE POLICY "Anon Modify CustomerBalanceTx" ON public.customer_balance_transactions FOR ALL USING (true);
+
+ALTER TABLE public.depo_movements ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Anon Select DepoMovements" ON public.depo_movements;
+CREATE POLICY "Anon Select DepoMovements" ON public.depo_movements FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Anon Modify DepoMovements" ON public.depo_movements;
+CREATE POLICY "Anon Modify DepoMovements" ON public.depo_movements FOR ALL USING (true);
+
+DO $$
+BEGIN
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.debt_payments;
+  EXCEPTION WHEN duplicate_object OR undefined_object THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.customer_balance_transactions;
+  EXCEPTION WHEN duplicate_object OR undefined_object THEN NULL;
+  END;
+  BEGIN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.depo_movements;
+  EXCEPTION WHEN duplicate_object OR undefined_object THEN NULL;
+  END;
+END $$;
+
+-- 6. Müştəri balansından məhsul çıxarışı RPC-si
 CREATE OR REPLACE FUNCTION public.withdraw_product_from_balance(
   p_customer_id TEXT,
   p_product_id TEXT,
@@ -162,7 +305,7 @@ BEGIN
 END;
 $$;
 
--- 5. Depo manual düzəlişi RPC — ləğv olunmuş satışları stokdan çıxmasın
+-- 7. Depo manual düzəlişi RPC — ləğv olunmuş satışları stokdan çıxmasın
 CREATE OR REPLACE FUNCTION public.record_manual_depo_adjustment(
   p_product_id TEXT,
   p_target_active_stock INTEGER,
@@ -220,7 +363,7 @@ BEGIN
 END;
 $$;
 
--- 6. Satışı tarixçəni silmədən ləğv etmə RPC-si
+-- 8. Satışı tarixçəni silmədən ləğv etmə RPC-si
 CREATE OR REPLACE FUNCTION public.cancel_sale_atomic(
   p_sale_id TEXT,
   p_reason TEXT DEFAULT 'Satış ləğv edildi',
@@ -272,7 +415,9 @@ BEGIN
 END;
 $$;
 
--- 7. Vahid Maliyyə İcmalı Funksiyası — qarışıq/qismən ödənişlər, ləğv istisnası & is_upfront ikiqat sayılma qoruması
+-- 9. Vahid Maliyyə İcmalı Funksiyası (DROP + CREATE — return sütun dəyişikliklərində xəta verməz)
+DROP FUNCTION IF EXISTS public.get_financial_summary(TEXT, TEXT);
+
 CREATE OR REPLACE FUNCTION public.get_financial_summary(p_start_date TEXT, p_end_date TEXT)
 RETURNS TABLE (
   gross_sales_total NUMERIC,
